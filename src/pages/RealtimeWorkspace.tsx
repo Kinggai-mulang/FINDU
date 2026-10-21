@@ -1,3 +1,4 @@
+import {realtimeDisplay} from '../services/realtime-display';
 import {useEffect,useRef,useState} from 'react';
 import {invoke} from '@tauri-apps/api/core';
 import {App,Button,Input,Select,Space,Table,Tag,Tooltip} from 'antd';
@@ -16,14 +17,16 @@ type Row=Pending&{snapshot?:RealtimeSnapshot};
 let savedPending:Pending[]=[];let savedFocus='';let savedChecked:string[]=[];
 const active=(s?:RealtimeSnapshot)=>s&&['starting','running','stopping'].includes(s.state);
 const states={idle:'待启动',starting:'正在启动',running:'运行中',stopping:'正在停止',stopped:'已停止',failed:'失败'};
-const metric=(s:RealtimeSnapshot|undefined,k:string,d=0)=>typeof s?.metrics?.[k]==='number'?Number(s.metrics[k]).toFixed(d):'—';
+const metric=(s:RealtimeSnapshot|undefined,k:string,now:number,d=0)=>{const value=realtimeDisplay(s,now).metrics?.[k];return typeof value==='number'&&Number.isFinite(value)?value.toFixed(d):'—';};
 export default function RealtimeWorkspace({snapshot,onResults}:{snapshot:WorkbenchSnapshot;onResults:(ids:string[])=>void}){
  const {message}=App.useApp();const [pending,setPendingState]=useState(savedPending);const [focus,setFocusState]=useState(savedFocus);const [checked,setCheckedState]=useState(savedChecked);const [paths,setPaths]=useState('');const [busy,setBusy]=useState(false);const [filter,setFilter]=useState('all');
  const setPending=(p:Pending[])=>{savedPending=p;setPendingState(p);};const setChecked=(ids:string[])=>{savedChecked=ids;setCheckedState(ids);};
  const sessions=snapshot.realtimeSessions??[];const rows:Row[]=[...sessions.map(s=>({key:s.sessionKey,label:s.label||s.configName,station:s.station||'未指定测站',sourcePath:s.sourcePath,snapshot:s})),...pending.filter(p=>!sessions.some(s=>s.sessionKey===p.key))];
  const focusKey=focus==='__new__'?'__new__':rows.some(r=>r.key===focus)?focus:rows[0]?.key||'__new__';
  const chosen=rows.find(r=>r.key===focusKey);const detail=snapshot.realtime?.sessionKey===focusKey&&snapshot.realtime.id===chosen?.snapshot?.id?snapshot.realtime:chosen?.snapshot;
- const running=sessions.filter(active).length;const selected=rows.filter(r=>checked.includes(r.key));
+ const [now,setNow]=useState(()=>Date.now()/1000);
+ const running=sessions.filter(active).length;
+ useEffect(()=>{if(!running)return;setNow(Date.now()/1000);const timer=setInterval(()=>setNow(Date.now()/1000),1000);return()=>clearInterval(timer);},[running]);const selected=rows.filter(r=>checked.includes(r.key));
  const select=(key:string)=>{savedFocus=key;setFocusState(key);workbenchEngine.selectLive(key);};
  const started=(key:string)=>{setPending(pending.filter(p=>p.key!==key));select(key);};
  const load=async(list:string[])=>{if(list.length+rows.length>16){message.warning('最多保留 16 路配置与会话，请先移除已结束记录');return;}setBusy(true);try{const docs=await Promise.all(list.map(path=>invoke<RealtimeDocument>('import_realtime',{path})));const firstOrdinal=nextOrdinal(rows.map(r=>r.label));const incoming=docs.map((doc,i)=>{const key=`plan-${crypto.randomUUID()}`;const label=sessionName(doc.name,firstOrdinal+i);seedRealtimeDraft(key,doc,label);return{key,label,station:doc.values.ROVE_NTRIP_Mountpoint||'未指定测站',sourcePath:doc.sourcePath};});setPending([...pending,...incoming]);setChecked([...checked,...incoming.map(p=>p.key)]);if(incoming[0])select(incoming[0].key);message.success(`已载入 ${incoming.length} 路配置，请核对测站分组与参数后启动`);}catch(e){message.error(String(e));}finally{setBusy(false);}};
@@ -44,9 +47,9 @@ export default function RealtimeWorkspace({snapshot,onResults}:{snapshot:Workben
  <Table<Row> size="small" rowKey="key" dataSource={displayed} pagination={{pageSize:6,hideOnSinglePage:true}} scroll={{x:1350}} rowClassName={r=>r.key===focusKey?'selected-live-row':''} rowSelection={{selectedRowKeys:checked,onChange:keys=>setChecked(keys.map(String))}} columns={[
  {title:'方案 / 测站',fixed:'left',width:200,render:(_,r)=><div className="live-row-name"><Tooltip title={`${r.label} · ${r.sourcePath}`}><strong>{compactSessionName(r.label,nameBudget)}</strong></Tooltip><small>{r.station}</small></div>},
  {title:'运行状态',width:110,render:(_,r)=><Tag color={r.snapshot?.state==='failed'?'error':active(r.snapshot)?'processing':'default'}>{states[r.snapshot?.state??'idle']}</Tag>},
- {title:'解状态',width:90,render:(_,r)=>r.snapshot?.solutionMode==='RECORD'?<Tag color='cyan'>仅录制</Tag>:<SolutionTag value={r.snapshot?.metrics?.solution}/>},
- {title:'观测 / 支持 / 使用',width:155,render:(_,r)=>`${metric(r.snapshot,'Obs')} / ${metric(r.snapshot,r.snapshot?.solutionMode==='RTK'?'Com':'OC')} / ${metric(r.snapshot,'FloUse')}`},
- {title:'HDOP / Ratio',width:130,render:(_,r)=>`${metric(r.snapshot,'HDOP',2)} / ${metric(r.snapshot,'Ratio',2)}`},
+ {title:'解状态',width:90,render:(_,r)=>r.snapshot?.solutionMode==='RECORD'?<Tag color='cyan'>仅录制</Tag>:<Tooltip title={realtimeDisplay(r.snapshot,now).epochDetail}><span><SolutionTag value={realtimeDisplay(r.snapshot,now).solution}/></span></Tooltip>},
+ {title:'观测 / 支持 / 使用',width:155,render:(_,r)=>`${metric(r.snapshot,'Obs',now)} / ${metric(r.snapshot,r.snapshot?.solutionMode==='RTK'?'Com':'OC',now)} / ${metric(r.snapshot,'FloUse',now)}`},
+ {title:'HDOP / 搜索 Ratio',width:130,render:(_,r)=>`${metric(r.snapshot,'HDOP',now,2)} / ${metric(r.snapshot,'Ratio',now,2)}`},
  {title:'产品 / 连接',width:140,render:(_,r)=>{const streams=r.snapshot?.heartbeat?.streams??[];return <span>{(r.snapshot?.productType==='RECORD'?'原始数据':r.snapshot?.productType)||'待配置'} · {streams.filter(s=>s.state===2).length}/{streams.length} 已连接</span>;}},
  {title:'更新 / 已读历元',width:155,render:(_,r)=><Tooltip title={r.snapshot?.error||r.snapshot?.parseError||r.sourcePath}><span>{r.snapshot?.solutionMode==='RECORD'?`${((r.snapshot.heartbeat?.streams??[]).reduce((n,s)=>n+s.bytes,0)/1048576).toFixed(2)} MiB / ${r.snapshot.recordingFiles?.length??0} 文件`:`${r.snapshot?.logUpdatedAt?.slice(11,19)||'—'} / ${r.snapshot?.receivedEpochs??0}`}</span></Tooltip>},
  {title:'操作',width:320,render:(_,r)=><Space wrap><Button size="small" type="link" onClick={()=>select(r.key)}>详情 / 配置</Button>{active(r.snapshot)?<Button size="small" type="link" danger onClick={()=>stop(r.key)}>停止</Button>:<Button type="link" size="small" onClick={()=>remove(r)}>移除</Button>}{r.snapshot?.outputDir&&<Button type="link" size="small" icon={<FolderOpenOutlined/>} onClick={()=>void invoke('open_live_folder',{sessionId:r.key}).catch(e=>message.error(String(e)))}>目录</Button>}{!active(r.snapshot)&&r.snapshot?.solutionMode!=='RECORD'&&r.snapshot?.logPath&&<Button type="link" size="small" onClick={()=>fullAnalysis(r)}>完整结果分析</Button>}</Space>},

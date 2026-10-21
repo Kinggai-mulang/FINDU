@@ -1,6 +1,7 @@
 import { copyFile, mkdir, readFile, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 const version=JSON.parse(await readFile('package.json','utf8')).version;
 const output=process.env.FINDYOU_PACKAGE_DIR??`deliverables/FINDU-${version}-windows-x64`; 
 const engineDir=process.env.FINDYOU_ENGINE_DIR??'resources/engine';
@@ -17,6 +18,10 @@ await copyFile('src-tauri/target/release/findyou.exe',path.join(output,'FINDU.ex
 await mkdir(path.join(output,'engine'),{recursive:true});
 for(const file of ['IPSPOS.exe','IPSClient.exe','manifest.json'])await copyFile(path.join(engineDir,file),path.join(output,'engine',file));
 for(const name of ['product-tools','product-runtime'])await cp('resources/'+name,path.join(output,name),{recursive:true,filter:source=>!source.includes('__pycache__')&&!/\.pyc$/i.test(source)});
+// A clean checkout must include native Python extensions (.pyd), not just python.exe.
+execFileSync(path.resolve(output,'product-runtime/python.exe'),['-I','-B','-c',
+ 'import sys,ssl,socket,lzma,bz2,sqlite3,ctypes;sys.path.insert(0,sys.argv[1]);import findyou_products',
+ path.resolve(output,'product-tools')],{windowsHide:true,stdio:'pipe'});
 await mkdir(path.join(output,'engine-tools'),{recursive:true});
 await copyFile('scripts/engine-bundle.py',path.join(output,'engine-tools/engine-bundle.py'));
 for(const [source,dest] of [['docs/ENGINE-UPDATE.md','引擎更换说明.md'],[`docs/RELEASE-${version}.md`,'使用与版本说明.md'],['THIRD_PARTY_NOTICES.md','THIRD_PARTY_NOTICES.md']])await copyFile(source,path.join(output,dest));

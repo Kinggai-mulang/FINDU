@@ -101,6 +101,7 @@ pub struct LiveSnapshot {
     pub log_path: Option<String>,
     pub parse_error: Option<String>,
     pub log_updated_at: Option<String>,
+    pub epoch_interval_seconds: Option<f64>,
     pub id: String,
     pub started_at: String,
     pub output_dir: String,
@@ -123,6 +124,39 @@ pub struct LiveSnapshot {
     pub status_error: Option<String>,
     pub recording_files:Vec<RecordingFile>,
 }
+/// Median epoch spacing also travels in the history-free overview.
+fn recent_epoch_interval(history:&[Value])->Option<f64>{
+    let tail=&history[history.len().saturating_sub(21)..];
+    let mut steps:Vec<f64>=tail.windows(2).filter_map(|pair|{
+        let a=chrono::DateTime::parse_from_rfc3339(pair[0]["time"].as_str()?).ok()?;
+        let b=chrono::DateTime::parse_from_rfc3339(pair[1]["time"].as_str()?).ok()?;
+        let seconds=(b-a).num_milliseconds() as f64/1000.;
+        (seconds>0.).then_some(seconds)
+    }).collect();
+    steps.sort_by(f64::total_cmp);
+    (steps.len()>=2).then(||steps[(steps.len()-1)/2])
+}
+
+#[cfg(test)]
+mod cadence_tests {
+    use super::*;
+    #[test] fn overview_and_detail_keep_cadence_without_copying_history(){
+        let runtime=RealtimeRuntime::new(PathBuf::new(),PathBuf::new());
+        runtime.data.lock().unwrap().history=vec![
+            serde_json::json!({"time":"2026-10-21T23:59:55Z"}),
+            serde_json::json!({"time":"2026-10-22T00:00:00Z"}),
+            serde_json::json!({"time":"2026-10-22T00:00:05Z"}),
+            serde_json::json!({"time":"2026-10-22T00:01:05Z"})];
+        assert_eq!(runtime.snapshot().epoch_interval_seconds,Some(5.));
+        let overview=runtime.summary();assert_eq!(overview.epoch_interval_seconds,Some(5.));
+        assert!(overview.history.is_empty());
+        assert_eq!(recent_epoch_interval(&[]),None);
+        assert_eq!(recent_epoch_interval(&[
+            serde_json::json!({"time":"2026-10-22T00:00:00Z"}),
+            serde_json::json!({"time":"2026-10-22T00:10:00Z"})]),None);
+    }
+}
+
 #[derive(Clone)]
 pub struct RealtimeRuntime {
     data: Arc<Mutex<LiveSnapshot>>,
@@ -240,11 +274,11 @@ impl RealtimeRuntime {
     }
     pub fn with_library(mut self,library:Option<Arc<crate::library::Library>>)->Self{self.library=library;self}
     pub fn snapshot(&self) -> LiveSnapshot {
-        let mut s=self.data.lock().unwrap().clone();s.buffered_epochs=s.epochs.len();s
+        let mut s=self.data.lock().unwrap().clone();s.buffered_epochs=s.epochs.len();s.epoch_interval_seconds=recent_epoch_interval(&s.history);s
     }
     pub fn set_key(&self,key:&str){let mut d=self.data.lock().unwrap();d.session_key=key.into();if d.label.is_empty(){d.label=format!("{} · {}",d.config_name,&key[..key.len().min(6)]);}}
     /// Overview never copies histories; four live sessions need only one full detail poll.
-    pub fn summary(&self)->LiveSnapshot{let d=self.data.lock().unwrap();LiveSnapshot{session_key:d.session_key.clone(),label:d.label.clone(),station:d.station.clone(),source_path:d.source_path.clone(),buffered_epochs:d.epochs.len(),analysis_config:d.analysis_config.clone(),state:d.state.clone(),config_name:d.config_name.clone(),product_type:d.product_type.clone(),log_path:d.log_path.clone(),parse_error:d.parse_error.clone(),log_updated_at:d.log_updated_at.clone(),id:d.id.clone(),started_at:d.started_at.clone(),output_dir:d.output_dir.clone(),process_id:d.process_id,engine_commit:d.engine_commit.clone(),heartbeat:d.heartbeat.clone(),metrics:d.metrics.clone(),error:d.error.clone(),reference_xyz:d.reference_xyz,received_epochs:d.received_epochs,solution_mode:d.solution_mode.clone(),log_version:d.log_version,engine_build_id:d.engine_build_id.clone(),ntrip_log_path:d.ntrip_log_path.clone(),product_log_path:d.product_log_path.clone(),status_error:d.status_error.clone(),recording_files:d.recording_files.clone(),..Default::default()}}
+    pub fn summary(&self)->LiveSnapshot{let d=self.data.lock().unwrap();LiveSnapshot{session_key:d.session_key.clone(),label:d.label.clone(),station:d.station.clone(),source_path:d.source_path.clone(),buffered_epochs:d.epochs.len(),analysis_config:d.analysis_config.clone(),state:d.state.clone(),config_name:d.config_name.clone(),product_type:d.product_type.clone(),log_path:d.log_path.clone(),parse_error:d.parse_error.clone(),log_updated_at:d.log_updated_at.clone(),epoch_interval_seconds:recent_epoch_interval(&d.history),id:d.id.clone(),started_at:d.started_at.clone(),output_dir:d.output_dir.clone(),process_id:d.process_id,engine_commit:d.engine_commit.clone(),heartbeat:d.heartbeat.clone(),metrics:d.metrics.clone(),error:d.error.clone(),reference_xyz:d.reference_xyz,received_epochs:d.received_epochs,solution_mode:d.solution_mode.clone(),log_version:d.log_version,engine_build_id:d.engine_build_id.clone(),ntrip_log_path:d.ntrip_log_path.clone(),product_log_path:d.product_log_path.clone(),status_error:d.status_error.clone(),recording_files:d.recording_files.clone(),..Default::default()}}
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
         let mut d = self.data.lock().unwrap();

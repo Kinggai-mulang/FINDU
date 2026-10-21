@@ -6,3 +6,5 @@
 *.png binary
 *.icns binary
 *.zip binary
+resources/product-runtime/** linguist-vendored
+resources/product-tools/ThirdParty/** linguist-vendored
