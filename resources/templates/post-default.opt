@@ -1,0 +1,33 @@
+# FINDYOU independent PPP configuration template
+# 1. GNSS solver options.
+GNSS_PMode = 3; # 0: exit without opening inputs or initializing a solver.
+GNSS_SatSYS = SYSGPS|SYSGAL|SYSBDS;
+GNSS_ExcludedPrn = ;
+
+# PPP-AR publishes validated fixed snapshots; qualified HOLD constraints may update the filter.
+GNSS_ARMode = 2;
+GNSS_RoveSampleTime = 30.0;
+
+# Observation weighting is selected in InitCGNSSOption; opt does not override it.
+# The following troposphere settings are retained for this post-processing dataset.
+GNSS_PPP_ISDV_ZWD2 = 0.0225;
+GNSS_PPP_PNSD_ZWD2 = 1.8e-12;
+GNSS_PPP_PNSD_Amb2 = 1e-12;
+
+# 2. Post-processing files.
+GNSS_FilePath = ;
+GNSS_RoveFile = ;
+GNSS_NaviFile = ;
+GNSS_SP3File = ;
+GNSS_CLKFile = ;
+GNSS_BIAFile = ;
+GNSS_ATXFile = ;
+GNSS_RefFile = ;
+
+# 3. 后处理结果输出；关闭某项时不会创建对应文件。
+GNSS_bOutputNMEA = ON;
+GNSS_bOutputLOG = ON; # Unified PPP/RTK Log=4.
+GNSS_bOutputULog = OFF;
+GNSS_bOutputAccuracy = OFF;
+GNSS_ULogLevel = DEBUG;
+GNSS_ULogFileFilter = CPPPoint.c,CPPPIAR.c,PreciseProduct.c,main.c;

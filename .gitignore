@@ -1,0 +1,55 @@
+# Dependencies, builds and user data
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+.local/
+runtime/
+deliverables/
+dataTest/
+design/
+*.log
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.pdb
+# Local investigation and historical packaging scripts
+/scripts/*
+!/scripts/tauri.mjs
+!/scripts/package.mjs
+!/scripts/engine-bundle.py
+# Keep portable unit and UI smoke tests
+/tests/*
+!/tests/*.test.ts
+!/tests/ui-smoke.mjs
+!/tests/ui-values.mjs
+# Publish maintained documentation, not local investigation evidence
+/docs/*
+!/docs/RELEASE-0.7.5.md
+!/docs/VALIDATION-0.7.5.md
+!/docs/ENGINE-UPDATE.md
+!/docs/DATA-DOWNLOADS.md
+!/docs/DIAGNOSTICS.md
+!/docs/LOG4-ADAPTER.md
+!/docs/REALTIME.md
+!/docs/ENU-ORIGIN.md
+!/docs/CONFIGURATION-REFRESH.md
+# Imported options may contain connection credentials
+*.opt
+!resources/templates/*.opt
+!resources/product-tools/opt/*.opt
+# Raw observations and GNSS products/results
+*.rtcm
+*.rtcm3
+*.obs
+*.rnx
+*.crx
+*.ffp
+*.sp3
+*.clk
+*.bia
+*.atx
+*.[0-9][0-9][ondg]

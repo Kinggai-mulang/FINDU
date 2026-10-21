@@ -1,0 +1,16 @@
+{
+  "commit": "9856121dc7cd347e8ffbc5d42bdb1e965c75136f",
+  "build_id": "9856121dc7cd-source-13c3c1e9f93bc088",
+  "source_modified": false,
+  "source_sha256": "13c3c1e9f93bc088d7f7e006f943bc2b5efef829788ed7063b826e57d314921e",
+  "ipspos_version": "BetaV0.604",
+  "protocols": {
+    "gnss_log": 4,
+    "client_status": 1
+  },
+  "built_at_utc": "2026-10-21T18:34:50.732176+00:00",
+  "platform": "windows-x64",
+  "configuration": "Release",
+  "solver_sha256": "8c587e2e579f182290305d1c1a8bfd9787fc0b4000bd5c17c831e2dbbcc4bfa4",
+  "client_sha256": "7c59d8a58b80bb930a578a7249e1719431fc6cbf154cf0eee6927083503b938d"
+}

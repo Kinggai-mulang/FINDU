@@ -1,0 +1,60 @@
+/* Configuration surfaces share the workstation's spacing, typography and role colors. */
+.post-editor{min-width:0;border-radius:18px;transition:box-shadow .18s}
+.post-editor.drag-active{box-shadow:0 0 0 2px #7caeff}
+.config-mode-intro{display:flex;flex-direction:column;gap:6px;margin:0 0 22px}
+.section-kicker{font-size:11px;font-weight:600;letter-spacing:1.5px;color:#83a4ce}
+.config-mode-intro strong{font-size:21px;font-weight:600;color:#e0eafa}
+.config-mode-intro>span:last-child{font-size:13px;color:#99abc3}
+.input-section{margin:24px 0;padding:20px;border:1px solid #303d52;border-radius:16px;background:linear-gradient(145deg,#1c2839aa,#171f2c80)}
+.input-section>header{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.input-section h3{font-size:15px;font-weight:600;line-height:1.6;margin:4px 0 0;color:#d6e3f5}
+.input-section .native-file-grid{margin:18px 0 0;gap:18px}
+.native-file-grid>div{min-width:0}
+.native-file-grid label{font-size:14px;color:#c3d1e4;margin-bottom:9px}
+.path-control{min-width:0;border:1px solid #344359;border-radius:12px;padding:12px;background:#111c2a;transition:border-color .16s,background .16s,box-shadow .16s}
+.path-control:hover{border-color:#536c8e}
+.path-control.drag-active{border-color:#8bb7ff;background:#203b59;box-shadow:0 0 0 3px #6ca7ff20}
+.path-control-heading{display:flex;align-items:center;gap:9px;min-width:0;margin:0 0 10px}
+.path-file-icon{color:#83adE5;font-size:17px}
+.path-file-name{min-width:0;flex:1;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;font-size:13px;color:#b5c5da}
+.path-assigned{flex-shrink:0;font-size:11px;color:#78c6af}
+.path-control .ant-input{font-size:13px;background:#142030}
+.path-control .ant-btn{background:#1c2b3f;border-color:#344359}
+.path-help,.path-drop-hint{margin-top:9px;font-size:12px;line-height:1.6;color:#859bb8}
+.path-drop-hint{color:#a9cdff}
+.path-control.is-disabled{opacity:.65}
+.path-control.compact{padding:10px}
+.path-control.compact .path-control-heading{margin-bottom:8px}
+.run-settings .path-control{width:100%;box-sizing:border-box}
+.run-settings .path-file-name{font-size:12px}
+.run-settings .path-assigned{display:none}
+.native-solver-controls{padding-top:5px;gap:20px}
+.native-solver-controls>div{min-width:0}
+.native-page .panel{border-radius:16px;overflow:hidden}
+.native-page .opt-list{padding:12px}
+.native-page .opt-item{background:#141e2d;border:1px solid #28384e}
+.native-page .opt-item.selected{background:linear-gradient(125deg,#243c59,#1d2d43);border-color:#527ba9}
+.native-page .opt-item strong{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.native-page .opt-item small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.native-page .config-summary{margin-top:22px;border-radius:12px}
+.native-page .input-advanced{border-color:#303d52;border-radius:12px;background:#182333}
+.native-page .input-advanced .native-file-grid{margin:5px 0}
+.realtime-config .panel{border-radius:16px;overflow:hidden;border-color:#303d52;background:linear-gradient(135deg,#1a2434,#161e2b)}
+.realtime-config .panel-heading{background:#1d2a3c55}
+.realtime-config .live-form-grid{gap:20px 24px}
+.realtime-config .ant-form-item-label>label{font-size:14px;color:#bdcde2}
+.realtime-config .ant-form-item-extra{font-size:12px;line-height:1.75;color:#8b9fb9;padding-top:6px}
+.realtime-config .source-cards{gap:20px}
+.realtime-config .source-card{border-radius:15px;padding:20px;border-color:#35465f;background:linear-gradient(150deg,#1f3046,#172232)}
+.realtime-config .source-card h4{font-size:16px;display:flex;align-items:center;gap:9px;margin:0 0 20px}
+.realtime-config .source-card h4 small{margin-left:auto;font-size:10px;letter-spacing:1.6px;color:#8ba6ca}
+.realtime-config .live-endpoint-grid{gap:4px 18px}
+.realtime-config .live-config-source{padding:20px}
+.realtime-config .path-control .ant-space-compact{width:100%}
+@media(max-width:1350px){
+ .native-grid{grid-template-columns:260px minmax(0,1fr)}
+ .native-fields{padding:20px}
+ .input-section{padding:16px}
+ .input-section .native-file-grid{grid-template-columns:1fr}
+ .realtime-config .source-cards{grid-template-columns:1fr}
+}

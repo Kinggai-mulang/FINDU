@@ -1,0 +1,18 @@
+{
+  "origin": "IPSPOS local product_download snapshot; FAST URL catalogue/time utilities and gzip",
+  "sourceFilesSha256": {
+    "scripts\\gnss\\product_download\\prepare.py": "6f5ce116ec434cbec4777db751e591086506dd857fa93e599f7352ee1bcca4c7",
+    "scripts\\gnss\\product_download\\observations.py": "b7629cb16417927a26b8a9f974015de58a287e486258751a34226e4b28c15d05",
+    "scripts\\gnss\\product_download\\products_io.py": "b93296b5110dfecd9b5f35c0927624ff4cfe5774ff46a648cfcaa37bbc14ee66",
+    "scripts\\gnss\\product_download\\sources.py": "80ce9ca831411260feb8bc27b880eed2b5b1045ef8cac57f05ae0dc48b53beda",
+    "scripts\\gnss\\product_download\\transfer.py": "56dc4c41d3cb125fe1c1107be9d105bae7c7cc1fb5ed00c4c19ebca1ac9cb688",
+    "ThirdParty/FAST/src/fast/com/gnssTime.py": "f38395272b42281b70294d0802478b9cbdf51980a62c479fe1f3952b2b801860",
+    "ThirdParty/FAST/src/fast/com/pub.py": "396e3fc65191feaa9a0ef289a570394321e5a80dc18da3a4f7c7beb7a319c22b",
+    "ThirdParty/FAST/src/fast/bin/fast_download_src.json": "44d4ea4cac1507e04be199bb3dafb77fda9b754ddef5df73839cba50c15a0344",
+    "ThirdParty/FAST/src/fast/bin/gzip.exe": "5ab48ea0bebacecf300a1b607aaf990c3ecba244d16b4d558c671709d67954ae",
+    "ThirdParty/FAST/src/fast/bin/cygwin1.dll": "58de7038d1a6ea60ac1f566afe8ac2a5755d2cf4b6ccb72f884063b4a088ccf2",
+    "ThirdParty/FAST/LICENSE": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809"
+  },
+  "note": "Independent FINDYOU copy. FAST license bundled in ThirdParty/FAST/LICENSE.",
+  "findyouChanges": "RTS basic orbit/clock OPT with explicit optional-product warnings; write_opt accepts absent optional NAV/ANTEX. Other grades retain strict preparation. Engine source is not changed."
+}

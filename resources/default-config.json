@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "name": "PPP 多系统标准模板",
+  "mode": "PPP",
+  "systems": ["GPS", "BDS", "GAL"],
+  "elevationDeg": 10,
+  "intervalSec": 1,
+  "productPath": ""
+}

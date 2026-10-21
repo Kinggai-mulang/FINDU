@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Main window: native file dialogs and explicitly selected JSON files only.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "fs:allow-read-text-file", "fs:allow-write-text-file", "fs:allow-write-file"]
+}

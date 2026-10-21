@@ -1,0 +1,8 @@
+* text=auto
+*.exe binary
+*.dll binary
+*.pyd binary
+*.ico binary
+*.png binary
+*.icns binary
+*.zip binary
