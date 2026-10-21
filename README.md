@@ -1,4 +1,7 @@
 # FINDU
+支持PPP、PPP-AR、RTK实时与后处理高效解算平台
+支持B2b，HAS等解算
+全面的数据结果对比分析与实时监控
 
 Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、数据录制与结果分析。基于 Tauri 2、React、TypeScript、Ant Design 和 ECharts。
 
