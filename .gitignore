@@ -11,7 +11,8 @@ design/
 *.log
 *.tsbuildinfo
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 .env
 .env.*
 !.env.example
@@ -53,3 +54,7 @@ __pycache__/
 *.bia
 *.atx
 *.[0-9][0-9][ondg]
+
+!/docs/RELEASE-0.7.6.md
+!/docs/REALTIME-VALIDATION-0.7.6.md
+!/tests/realtime-display-desktop.mjs
