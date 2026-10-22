@@ -1,16 +1,17 @@
 {
-  "commit": "9856121dc7cd347e8ffbc5d42bdb1e965c75136f",
-  "build_id": "9856121dc7cd-source-13c3c1e9f93bc088",
+  "commit": "981723824b4e3ae12c7803a4c1fea1fdc34e2f51",
+  "build_id": "981723824b4e-source-92faa2fc90bd3630",
   "source_modified": false,
-  "source_sha256": "13c3c1e9f93bc088d7f7e006f943bc2b5efef829788ed7063b826e57d314921e",
-  "ipspos_version": "BetaV0.604",
+  "source_sha256": "92faa2fc90bd36301537283a0c46d38795b460bc9c68ae1eb51e29172b0ffa76",
+  "source_hash_method": "SHA-256 of git ls-tree -r --full-tree <commit> stdout",
+  "ipspos_version": "BetaV0.605",
   "protocols": {
     "gnss_log": 4,
     "client_status": 1
   },
-  "built_at_utc": "2026-10-21T18:34:50.732176+00:00",
+  "built_at_utc": "2026-10-22T10:32:42.840980+00:00",
   "platform": "windows-x64",
   "configuration": "Release",
-  "solver_sha256": "8c587e2e579f182290305d1c1a8bfd9787fc0b4000bd5c17c831e2dbbcc4bfa4",
-  "client_sha256": "7c59d8a58b80bb930a578a7249e1719431fc6cbf154cf0eee6927083503b938d"
+  "solver_sha256": "3a9602664c4251e238bff33889b04fbd8415bb0324573016527973431f0e2196",
+  "client_sha256": "c65ffefd9d78f28fc7a171bddb04bc89e4db882ef3e30e5d6cc2fd1282602614"
 }

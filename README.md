@@ -5,11 +5,11 @@
 
 Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、数据录制与结果分析。基于 Tauri 2、React、TypeScript、Ant Design 和 ECharts。
 
-当前正式版：**v0.7.7**，运行引擎 **IPSPOS BetaV0.604**（GNSS Log=4 / StatusLog=1）。
+当前正式版：**v0.7.8**，运行引擎 **IPSPOS BetaV0.605**（GNSS Log=4 / StatusLog=1）。
 
 ## 下载与运行
 
-从 [v0.7.7 正式发布](https://github.com/Kinggai-mulang/FINDU/releases/tag/v0.7.7) 下载 Windows x64 便携包，完整解压后双击 FINDU.exe。请整体保留 engine、product-tools、product-runtime 等目录。
+从 [v0.7.8 正式发布](https://github.com/Kinggai-mulang/FINDU/releases/tag/v0.7.8) 下载 Windows x64 便携包，完整解压后双击 FINDU.exe。请整体保留 engine、product-tools、product-runtime 等目录。
 
 需要 Windows x64、Microsoft Edge WebView2 Runtime 和 Microsoft Visual C++ 2015–2022 x64 运行库。程序未签名。产品下载和实时数据源需要网络；无需另装 Python、MATLAB 或 Docker。
 
@@ -20,7 +20,7 @@ Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、�
 - **实时监控**：最多同时运行 16 路，每次最多对比 6 路方案；配置数据流，实时解算、回放或仅录制；切换页面保持后台会话和已有统计，返回后继续显示。
 - **分析对比**：位置、ENU、残差、产品时效及大气诊断；跨天曲线标注 UTC 日期，显示完整时间范围和覆盖日数。没有独立参考坐标时，ENU 表示相对位置变化。
 
-详细使用与变化见 [版本说明](docs/RELEASE-0.7.7.md)，本次容量验证见 [16 路实时 / 6 路对比 / 32 路后处理](docs/CAPACITY-VALIDATION-0.7.7.md)，此前真实流长测见 [v0.7.6 记录](docs/REALTIME-VALIDATION-0.7.6.md)，此前多天后处理验证见 [v0.7.5 验证摘要](docs/VALIDATION-0.7.5.md)。
+详细使用与变化见 [版本说明](docs/RELEASE-0.7.8.md)，本次完整回归见 [v0.7.8 验证记录](docs/VALIDATION-0.7.8.md)，此前容量验证见 [16 路实时 / 6 路对比 / 32 路后处理](docs/CAPACITY-VALIDATION-0.7.7.md)，此前真实流长测见 [v0.7.6 记录](docs/REALTIME-VALIDATION-0.7.6.md)，此前多天后处理验证见 [v0.7.5 验证摘要](docs/VALIDATION-0.7.5.md)。
 
 ## 从源码构建
 
@@ -44,7 +44,7 @@ pnpm desktop:package
 
 打包会实际导入随包 Python 的 SSL、socket、压缩、SQLite、ctypes 和产品下载模块；缺失原生运行扩展时立即失败。
 
-输出位于 deliverables/FINDU-0.7.7-windows-x64。仅运行 pnpm dev 是浏览器界面预览，真实解算需要桌面程序。UI 冒烟测试可在 pnpm dev 启动后运行 pnpm test:ui，需要本机 Microsoft Edge。实时指标桌面回归脚本为 `tests/realtime-display-desktop.mjs`，通过 `FINDYOU_CDP` 指定独立测试副本的调试地址；脚本要求目标没有运行中的实时会话。
+输出位于 deliverables/FINDU-0.7.8-windows-x64。仅运行 pnpm dev 是浏览器界面预览，真实解算需要桌面程序。UI 冒烟测试可在 pnpm dev 启动后运行 pnpm test:ui，需要本机 Microsoft Edge。实时指标桌面回归脚本为 `tests/realtime-display-desktop.mjs`，通过 `FINDYOU_CDP` 指定独立测试副本的调试地址；脚本要求目标没有运行中的实时会话。
 
 ## 仓库范围与数据
 

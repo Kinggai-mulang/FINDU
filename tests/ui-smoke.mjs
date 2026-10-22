@@ -12,6 +12,7 @@ const page=desktop?context.pages()[0]:await context.newPage();
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 if(!desktop)await page.goto('http://127.0.0.1:1420');
 await page.waitForSelector('.nav-item');
+if(desktop){const demo=page.getByRole('button',{name:'开发演示入口',exact:true});if(await demo.count())await demo.click();}
 await page.getByRole('button',{name:'实时监控 Monitor'}).click();
 if(desktop)await page.getByRole('button',{name:'模拟监控',exact:true}).click();
 if(await page.getByRole('button',{name:/停止模拟/}).count())await page.getByRole('button',{name:/停止模拟/}).click();
@@ -23,7 +24,7 @@ await page.screenshot({path:`${output}/${desktop?'desktop-':''}01-monitor.png`})
 await page.getByRole('button',{name:'后处理 Processing'}).click();
 if(desktop)await page.getByRole('button',{name:'模拟演示',exact:true}).click();
 await page.getByRole('button',{name:/创建模拟任务/}).click();
-await page.waitForFunction(()=>document.querySelector('.ant-table-tbody')?.textContent.includes('运行中'));
+await page.waitForFunction(()=>[...document.querySelectorAll('.ant-table-tbody')].find(el=>el.getClientRects().length>0)?.textContent.includes('运行中'));
 await page.screenshot({path:`${output}/${desktop?'desktop-':''}02-post.png`});
 await page.getByRole('button',{name:'数据与下载 Data & Products'}).click();
 await page.getByRole('heading',{name:'数据与下载',exact:true}).waitFor();
@@ -33,7 +34,7 @@ await page.getByRole('button',{name:'后处理 Processing'}).click();
 await page.getByRole('button',{name:'查看结果',exact:true}).first().waitFor({timeout:20000});
 await page.getByRole('button',{name:'查看结果',exact:true}).first().click();
 await page.getByRole('heading',{name:'分析对比',exact:true}).waitFor();
-assert.ok((await page.locator('.ant-table-tbody').textContent()).includes('1800'));
+assert.ok((await page.locator('.ant-table-tbody:visible').textContent()).includes('1800'));
 await page.screenshot({path:`${output}/${desktop?'desktop-':''}04-analysis.png`});
 if(!desktop){
   const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:/导出指标 CSV/}).click();
@@ -47,10 +48,10 @@ if(!desktop){
   await page.getByRole('button',{name:'后处理 Processing'}).click();
   await page.getByRole('button',{name:/创建模拟任务/}).click();
   await page.getByRole('button',{name:'取消',exact:true}).first().click();
-  await page.locator('.ant-table-tbody').getByText('已取消',{exact:true}).waitFor();
+  await page.locator('.ant-table-tbody:visible').getByText('已取消',{exact:true}).waitFor();
   await page.getByRole('checkbox',{name:'模拟产品覆盖不足，验证失败流程'}).check();
   await page.getByRole('button',{name:/创建模拟任务/}).click();
-  await page.locator('.ant-table-tbody').getByText('失败',{exact:true}).waitFor({timeout:12000});
+  await page.locator('.ant-table-tbody:visible').getByText('失败',{exact:true}).waitFor({timeout:12000});
   await page.reload();await page.getByRole('button',{name:'数据与下载 Data & Products'}).click();
   await page.getByRole('heading',{name:'数据与下载',exact:true}).waitFor();
 }

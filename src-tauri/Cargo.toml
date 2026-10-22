@@ -1,6 +1,6 @@
 [package]
 name = "findyou"
-version = "0.7.7"
+version = "0.7.8"
 default-run = "findyou"
 description = "FINDU GNSS 工作台"
 authors = ["FINDU"]
