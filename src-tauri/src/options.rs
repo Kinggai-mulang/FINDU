@@ -78,8 +78,8 @@ pub struct OptDocument {
     pub text: String,
 }
 pub fn load(paths: Vec<String>) -> Result<Vec<OptDocument>, String> {
-    if paths.is_empty() || paths.len() > 20 {
-        return Err("一次导入 1–20 个 .opt 文件".into());
+    if paths.is_empty() || paths.len() > crate::native::capacity::LIMITS.postprocess_runs {
+        return Err(format!("一次导入 1–{} 个 .opt 文件",crate::native::capacity::LIMITS.postprocess_runs));
     }
     paths.into_iter().map(|p|{
         let path=fs::canonicalize(p).map_err(|e|e.to_string())?;
@@ -181,4 +181,8 @@ mod compatibility_tests {
         assert!(check_solver_options(&parse("GNSS_UserType=4;")).is_err());
         assert!(check_solver_options(&parse("GNSS_Monitoring_Scenarios=0;")).is_err());
     }
+}
+
+#[cfg(test)]mod import_capacity_tests {use super::*;
+ #[test]fn imports_thirty_two_documents_and_rejects_thirty_three(){let p=std::env::temp_dir().join(format!("findu-import-capacity-{}.opt",uuid::Uuid::new_v4()));fs::write(&p,"GNSS_PMode = 3;\nGNSS_RoveFile = sample.24o;\n").unwrap();let value=p.to_string_lossy().into_owned();assert_eq!(load(vec![value.clone();32]).unwrap().len(),32);assert!(load(vec![value;33]).err().unwrap().contains("32"));fs::remove_file(p).unwrap();}
 }

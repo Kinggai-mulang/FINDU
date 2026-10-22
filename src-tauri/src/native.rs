@@ -1,3 +1,5 @@
+#[path="capacity.rs"]
+pub mod capacity;
 use crate::{
     options,
     results::{self, RealResult},
@@ -178,8 +180,8 @@ impl NativeRuntime {
         concurrency: usize,
     ) -> Result<Vec<String>, String> {
         self.info()?;
-        if !(1..=32).contains(&concurrency) {
-            return Err("并发数支持 1–32".into());
+        if !(1..=capacity::LIMITS.postprocess_runs).contains(&concurrency) {
+            return Err(format!("并发数支持 1–{}",capacity::LIMITS.postprocess_runs));
         }
         if requests.is_empty() || requests.len() > 128 {
             return Err("一次提交 1–128 个任务".into());

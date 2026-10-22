@@ -1,4 +1,4 @@
-# FINDYOU independent PPP configuration template
+# FINDU independent PPP configuration template
 # 1. GNSS solver options.
 GNSS_PMode = 3; # 0: exit without opening inputs or initializing a solver.
 GNSS_SatSYS = SYSGPS|SYSGAL|SYSBDS;

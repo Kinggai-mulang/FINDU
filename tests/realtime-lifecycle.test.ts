@@ -33,3 +33,8 @@ it('keeps live comparisons when viewing an archive and resumes them without dele
  expect(bridge.invoke.mock.calls.some(([cmd])=>cmd==='realtime_results')).toBe(false);expect(e.getSnapshot().results.find(v=>v.id==='live-a')).toBe(saved);
  e.setVisibleAnalysisResults(['live-a']);await poll(e);expect(e.getSnapshot().results.find(v=>v.id==='live-a')?.diagnostics?.[0].ZWD).toBe(.9);
 });
+
+it('compares six live sessions and rejects a seventh before requesting native history',async()=>{
+ const ids=Array.from({length:6},(_,i)=>`session-${i}`);bridge.invoke.mockResolvedValue(ids.map(id=>({id:`live-${id}`,name:id,station:'same',source:'ipspos',epochs:[],diagnostics:[]})));
+ const e=new WorkbenchEngine();expect(await e.compareLive(ids)).toHaveLength(6);expect(bridge.invoke).toHaveBeenCalledWith('realtime_results',{ids});bridge.invoke.mockClear();await expect(e.compareLive([...ids,'seventh'])).rejects.toThrow('6');expect(bridge.invoke).not.toHaveBeenCalled();
+});

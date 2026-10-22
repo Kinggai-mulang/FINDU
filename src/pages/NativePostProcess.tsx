@@ -1,3 +1,4 @@
+import capacity from '../../contracts/capacity.json';
 import {useEffect,useState,type Dispatch,type SetStateAction} from 'react';
 import {invoke} from '@tauri-apps/api/core';
 import {Alert,App,Button,Checkbox,Collapse,Input,InputNumber,Select,Space,Table,Tag,Progress,Segmented} from 'antd';
@@ -38,7 +39,7 @@ export default function NativePostProcess({snapshot,onResult,documents,setDocume
     <div className="native-grid"><Panel title={`配置文件 · ${documents.length}`} extra={<Button type="text" size="small" disabled={!documents.length||busy} onClick={()=>{setDocuments([]);setActive(0);setDraft({sourcePath:"findyou-draft:"+crypto.randomUUID(),name:"手动配置.opt",text:defaultOpt});}}>清空</Button>}>
       <div className="opt-list">{documents.length?documents.map((d,i)=><button key={d.sourcePath} className={`opt-item ${i===active?'selected':''}`} onClick={()=>setActive(i)}><strong title={d.name}>{d.name.replace(/\.opt$/i,'')}</strong><small title={d.sourcePath}>{d.sourcePath.startsWith('findyou-draft:')?'手动配置 · 运行时保存副本':d.sourcePath}</small><Tag>{isRtkMode(parseOpt(d.text).GNSS_PMode)?'RTK / 双站观测':parseOpt(d.text).GNSS_ProductFile?'RTCM / SSR 回放':'RINEX / 精密产品'}</Tag></button>):<div className="native-empty">右侧可直接配置文件<br/>也可拖入多个 OPT 批量运行</div>}</div>
       <div className="run-settings"><label>运行方式</label><Segmented block value={mode} onChange={v=>setMode(v as 'post'|'replay')} options={[{value:'post',label:'后处理'},{value:'replay',label:'仿实时回放'}]}/>{mode==='replay'&&<><label>观测时间倍速</label><Select aria-label="回放倍速" value={speed} onChange={setSpeed} options={[1,10,60,600,3600,86400].map(v=>({value:v,label:`${v}×`}))}/><small>先执行同一 IPSPOS 解算，再按真实历元时间播放；不是在线 Ntrip。</small></>}
-        <label>并行任务数</label><Select aria-label="并行任务数" value={concurrency} onChange={setConcurrency} options={Array.from({length:32},(_,i)=>({value:i+1,label:`${i+1} · ${i?'独立进程并行':'顺序执行'}`}))}/>
+        <label>并行任务数</label><Select aria-label="并行任务数" value={concurrency} onChange={setConcurrency} options={Array.from({length:capacity.postprocessRuns},(_,i)=>({value:i+1,label:`${i+1} · ${i?'独立进程并行':'顺序执行'}`}))}/>
         <label>结果根目录</label><PathInput field="真实结果根目录" label="结果根目录" directory compact value={output} onChange={setOutput} hint="当前工程 runtime/postprocess"/><small>每个任务创建独立 run-ID 子目录；不覆盖原数据与原 .opt。</small>
         <Button type="primary" size="large" icon={<PlayCircleOutlined/>} block loading={busy} disabled={!desktop||!info} onClick={submit}>运行全部 {documents.length||1} 个 OPT</Button>
       </div>

@@ -1,3 +1,4 @@
+import capacity from '../../contracts/capacity.json';
 import {invoke} from '@tauri-apps/api/core';
 import type {EngineInfo,EngineService,NativeRunRequest,NativeSnapshot,NativeTask,ResultSet,Task,RealtimeSnapshot} from '../../contracts';
 import {MockEngineService} from './engine';
@@ -50,7 +51,7 @@ export class WorkbenchEngine implements EngineService {
  }catch(error){if(!this.errorReported){console.error('Native engine poll failed',error);this.errorReported=true;}}finally{this.polling=false;}}
  async submitNative(requests:NativeRunRequest[],concurrency:number){const ids=await invoke<string[]>('submit_native',{requests,concurrency});await this.poll();return ids;}
  selectLive=(id:string)=>{this.liveSelectionVersion++;this.selectedLiveId=id;this.realtime=undefined;this.detailText=undefined;this.publish();if(isDesktop())void this.poll();};
- async compareLive(ids:string[]){const incoming=await invoke<Omit<ResultSet,'config'>[]>('realtime_results',{ids});this.comparisonKeys=ids;this.setLiveResults(incoming);this.publish();return this.liveResults.map(r=>r.id);}
+ async compareLive(ids:string[]){if(ids.length>capacity.comparisonResults)throw new Error(`一次最多对比 ${capacity.comparisonResults} 路方案`);const incoming=await invoke<Omit<ResultSet,'config'>[]>('realtime_results',{ids});this.comparisonKeys=ids;this.setLiveResults(incoming);this.publish();return this.liveResults.map(r=>r.id);}
  setAnalysisVisible=(visible:boolean)=>{this.analysisVisible=visible;};
  setRealtimeVisible=(visible:boolean)=>{this.realtimeVisible=visible;};
  setVisibleAnalysisResults=(ids:string[])=>{this.visibleAnalysisIds=new Set(ids);};

@@ -58,3 +58,6 @@ __pycache__/
 !/docs/RELEASE-0.7.6.md
 !/docs/REALTIME-VALIDATION-0.7.6.md
 !/tests/realtime-display-desktop.mjs
+
+!/docs/RELEASE-0.7.7.md
+!/docs/CAPACITY-VALIDATION-0.7.7.md
