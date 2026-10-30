@@ -18,17 +18,10 @@ pub fn workspace(exe: &Path) -> PathBuf {
         return parent.parent().unwrap_or(parent).to_path_buf();
     }
     // Development binaries live under this checkout; portable copies resolve beside their exe.
-    if parent
-        .file_name()
-        .is_some_and(|n| n == "debug" || n == "release")
-        && parent
-            .parent()
-            .is_some_and(|p| p.file_name().is_some_and(|n| n == "target"))
+    if parent.file_name().is_some_and(|n| n == "debug" || n == "release")
+        && parent.parent().is_some_and(|p| p.file_name().is_some_and(|n| n == "target"))
     {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .to_path_buf();
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
     }
     parent.to_path_buf()
 }
@@ -46,8 +39,7 @@ impl RuntimePaths {
             "config",
             "exports",
         ] {
-            std::fs::create_dir_all(root.join(folder))
-                .map_err(|e| format!("本地运行目录不可写：{e}"))?;
+            std::fs::create_dir_all(root.join(folder)).map_err(|e| format!("本地运行目录不可写：{e}"))?;
         }
         Ok(Self {
             workspace: crate::options::display_path(&workspace),
@@ -68,9 +60,6 @@ mod tests {
             workspace(Path::new("D:/apps/FINDYOU/deliverables/FINDYOU.exe")),
             PathBuf::from("D:/apps/FINDYOU")
         );
-        assert_eq!(
-            workspace(Path::new("D:/portable/FINDYOU.exe")),
-            PathBuf::from("D:/portable")
-        );
+        assert_eq!(workspace(Path::new("D:/portable/FINDYOU.exe")), PathBuf::from("D:/portable"));
     }
 }

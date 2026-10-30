@@ -51,19 +51,9 @@ const KEYS: &[&str] = &[
     "GNSS_Environment",
 ];
 const ROLES: &[&str] = &["ROVE", "BASE", "PRODUCT", "BIAS", "ATMO"];
-const SUFFIXES: &[&str] = &[
-    "CasterHost",
-    "Mountpoint",
-    "Port",
-    "UserID",
-    "Password",
-    "DataType",
-];
+const SUFFIXES: &[&str] = &["CasterHost", "Mountpoint", "Port", "UserID", "Password", "DataType"];
 fn allowed(key: &str) -> bool {
-    KEYS.contains(&key)
-        || ROLES
-            .iter()
-            .any(|r| SUFFIXES.iter().any(|s| key == format!("{r}_NTRIP_{s}")))
+    KEYS.contains(&key) || ROLES.iter().any(|r| SUFFIXES.iter().any(|s| key == format!("{r}_NTRIP_{s}")))
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,10 +74,10 @@ pub struct LiveRequest {
 #[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingFile {
-    pub name:String,
-    pub path:String,
-    pub role:String,
-    pub bytes:u64,
+    pub name: String,
+    pub path: String,
+    pub role: String,
+    pub bytes: u64,
 }
 #[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -97,7 +87,7 @@ pub struct LiveSnapshot {
     pub station: String,
     pub source_path: String,
     pub buffered_epochs: usize,
-    pub analysis_config: std::collections::HashMap<String,String>,
+    pub analysis_config: std::collections::HashMap<String, String>,
     pub state: String,
     pub config_name: String,
     pub product_type: String,
@@ -125,38 +115,48 @@ pub struct LiveSnapshot {
     pub ntrip_log_path: Option<String>,
     pub product_log_path: Option<String>,
     pub status_error: Option<String>,
-    pub recording_files:Vec<RecordingFile>,
+    pub recording_files: Vec<RecordingFile>,
 }
 /// Median epoch spacing also travels in the history-free overview.
-fn recent_epoch_interval(history:&[Value])->Option<f64>{
-    let tail=&history[history.len().saturating_sub(21)..];
-    let mut steps:Vec<f64>=tail.windows(2).filter_map(|pair|{
-        let a=chrono::DateTime::parse_from_rfc3339(pair[0]["time"].as_str()?).ok()?;
-        let b=chrono::DateTime::parse_from_rfc3339(pair[1]["time"].as_str()?).ok()?;
-        let seconds=(b-a).num_milliseconds() as f64/1000.;
-        (seconds>0.).then_some(seconds)
-    }).collect();
+fn recent_epoch_interval(history: &[Value]) -> Option<f64> {
+    let tail = &history[history.len().saturating_sub(21)..];
+    let mut steps: Vec<f64> = tail
+        .windows(2)
+        .filter_map(|pair| {
+            let a = chrono::DateTime::parse_from_rfc3339(pair[0]["time"].as_str()?).ok()?;
+            let b = chrono::DateTime::parse_from_rfc3339(pair[1]["time"].as_str()?).ok()?;
+            let seconds = (b - a).num_milliseconds() as f64 / 1000.;
+            (seconds > 0.).then_some(seconds)
+        })
+        .collect();
     steps.sort_by(f64::total_cmp);
-    (steps.len()>=2).then(||steps[(steps.len()-1)/2])
+    (steps.len() >= 2).then(|| steps[(steps.len() - 1) / 2])
 }
 
 #[cfg(test)]
 mod cadence_tests {
     use super::*;
-    #[test] fn overview_and_detail_keep_cadence_without_copying_history(){
-        let runtime=RealtimeRuntime::new(PathBuf::new(),PathBuf::new());
-        runtime.data.lock().unwrap().history=vec![
+    #[test]
+    fn overview_and_detail_keep_cadence_without_copying_history() {
+        let runtime = RealtimeRuntime::new(PathBuf::new(), PathBuf::new());
+        runtime.data.lock().unwrap().history = vec![
             serde_json::json!({"time":"2026-10-21T23:59:55Z"}),
             serde_json::json!({"time":"2026-10-22T00:00:00Z"}),
             serde_json::json!({"time":"2026-10-22T00:00:05Z"}),
-            serde_json::json!({"time":"2026-10-22T00:01:05Z"})];
-        assert_eq!(runtime.snapshot().epoch_interval_seconds,Some(5.));
-        let overview=runtime.summary();assert_eq!(overview.epoch_interval_seconds,Some(5.));
+            serde_json::json!({"time":"2026-10-22T00:01:05Z"}),
+        ];
+        assert_eq!(runtime.snapshot().epoch_interval_seconds, Some(5.));
+        let overview = runtime.summary();
+        assert_eq!(overview.epoch_interval_seconds, Some(5.));
         assert!(overview.history.is_empty());
-        assert_eq!(recent_epoch_interval(&[]),None);
-        assert_eq!(recent_epoch_interval(&[
-            serde_json::json!({"time":"2026-10-22T00:00:00Z"}),
-            serde_json::json!({"time":"2026-10-22T00:10:00Z"})]),None);
+        assert_eq!(recent_epoch_interval(&[]), None);
+        assert_eq!(
+            recent_epoch_interval(&[
+                serde_json::json!({"time":"2026-10-22T00:00:00Z"}),
+                serde_json::json!({"time":"2026-10-22T00:10:00Z"})
+            ]),
+            None
+        );
     }
 }
 
@@ -166,7 +166,7 @@ pub struct RealtimeRuntime {
     stop: Arc<AtomicBool>,
     engine_dir: PathBuf,
     root: PathBuf,
-    library:Option<Arc<crate::library::Library>>,
+    library: Option<Arc<crate::library::Library>>,
 }
 fn read_opt(path: &str) -> Result<String, String> {
     let p = Path::new(path);
@@ -196,11 +196,7 @@ fn imported_values(text: &str) -> BTreeMap<String, String> {
         let canonical = KEYS
             .iter()
             .map(|s| s.to_string())
-            .chain(
-                ROLES
-                    .iter()
-                    .flat_map(|r| SUFFIXES.iter().map(move |s| format!("{r}_NTRIP_{s}"))),
-            )
+            .chain(ROLES.iter().flat_map(|r| SUFFIXES.iter().map(move |s| format!("{r}_NTRIP_{s}"))))
             .find(|key| key.eq_ignore_ascii_case(options::canonical(k)));
         if let Some(key) = canonical {
             values.insert(key, v.into());
@@ -213,28 +209,16 @@ fn imported_values(text: &str) -> BTreeMap<String, String> {
                 }
             }
         }
-        for alias in [
-            "ATMO_NTRIP_",
-            "ATMO_",
-            "ION_NTRIP_",
-            "ION_",
-            "IONO_NTRIP_",
-            "IONO_",
-        ] {
+        for alias in ["ATMO_NTRIP_", "ATMO_", "ION_NTRIP_", "ION_", "IONO_NTRIP_", "IONO_"] {
             for suffix in SUFFIXES {
                 if k.eq_ignore_ascii_case(&format!("{alias}{suffix}")) {
                     values.insert(format!("ATMO_NTRIP_{suffix}"), v.into());
                 }
             }
         }
-        if [
-            "PRODUCT_NTRIP_Type",
-            "PRODUCT_NTRIP_Format",
-            "GNSS_ProductType",
-            "GNSS_ProductFormat",
-        ]
-        .iter()
-        .any(|key| k.eq_ignore_ascii_case(key))
+        if ["PRODUCT_NTRIP_Type", "PRODUCT_NTRIP_Format", "GNSS_ProductType", "GNSS_ProductFormat"]
+            .iter()
+            .any(|key| k.eq_ignore_ascii_case(key))
         {
             values.insert("PRODUCT_NTRIP_Type".into(), v.into());
         }
@@ -254,34 +238,74 @@ pub fn import(path: String) -> Result<LiveDocument, String> {
     let values = imported_values(&text);
     Ok(LiveDocument {
         source_path: options::display_path(Path::new(&path)),
-        name: Path::new(&path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into(),
+        name: Path::new(&path).file_name().unwrap().to_string_lossy().into(),
         values,
     })
 }
 impl RealtimeRuntime {
     pub fn new(engine_dir: PathBuf, root: PathBuf) -> Self {
         Self {
-            data: Arc::new(Mutex::new(LiveSnapshot {
-                state: "idle".into(),
-                ..Default::default()
-            })),
+            data: Arc::new(Mutex::new(LiveSnapshot { state: "idle".into(), ..Default::default() })),
             stop: Arc::new(AtomicBool::new(false)),
             engine_dir,
             root,
-            library:None,
+            library: None,
         }
     }
-    pub fn with_library(mut self,library:Option<Arc<crate::library::Library>>)->Self{self.library=library;self}
-    pub fn snapshot(&self) -> LiveSnapshot {
-        let mut s=self.data.lock().unwrap().clone();s.buffered_epochs=s.epochs.len();s.epoch_interval_seconds=recent_epoch_interval(&s.history);s
+    pub fn with_library(mut self, library: Option<Arc<crate::library::Library>>) -> Self {
+        self.library = library;
+        self
     }
-    pub fn set_key(&self,key:&str){let mut d=self.data.lock().unwrap();d.session_key=key.into();if d.label.is_empty(){d.label=format!("{} · {}",d.config_name,&key[..key.len().min(6)]);}}
+    pub fn snapshot(&self) -> LiveSnapshot {
+        let mut s = self.data.lock().unwrap().clone();
+        s.buffered_epochs = s.epochs.len();
+        s.epoch_interval_seconds = recent_epoch_interval(&s.history);
+        s
+    }
+    pub fn set_key(&self, key: &str) {
+        let mut d = self.data.lock().unwrap();
+        d.session_key = key.into();
+        if d.label.is_empty() {
+            d.label = format!("{} · {}", d.config_name, &key[..key.len().min(6)]);
+        }
+    }
     /// Overview never copies histories; four live sessions need only one full detail poll.
-    pub fn summary(&self)->LiveSnapshot{let d=self.data.lock().unwrap();LiveSnapshot{session_key:d.session_key.clone(),label:d.label.clone(),station:d.station.clone(),source_path:d.source_path.clone(),buffered_epochs:d.epochs.len(),analysis_config:d.analysis_config.clone(),state:d.state.clone(),config_name:d.config_name.clone(),product_type:d.product_type.clone(),log_path:d.log_path.clone(),parse_error:d.parse_error.clone(),log_updated_at:d.log_updated_at.clone(),epoch_interval_seconds:recent_epoch_interval(&d.history),id:d.id.clone(),started_at:d.started_at.clone(),output_dir:d.output_dir.clone(),process_id:d.process_id,engine_commit:d.engine_commit.clone(),heartbeat:d.heartbeat.clone(),metrics:d.metrics.clone(),error:d.error.clone(),reference_xyz:d.reference_xyz,received_epochs:d.received_epochs,solution_mode:d.solution_mode.clone(),log_version:d.log_version,engine_build_id:d.engine_build_id.clone(),ntrip_log_path:d.ntrip_log_path.clone(),product_log_path:d.product_log_path.clone(),status_error:d.status_error.clone(),recording_files:d.recording_files.clone(),..Default::default()}}
+    pub fn summary(&self) -> LiveSnapshot {
+        let d = self.data.lock().unwrap();
+        LiveSnapshot {
+            session_key: d.session_key.clone(),
+            label: d.label.clone(),
+            station: d.station.clone(),
+            source_path: d.source_path.clone(),
+            buffered_epochs: d.epochs.len(),
+            analysis_config: d.analysis_config.clone(),
+            state: d.state.clone(),
+            config_name: d.config_name.clone(),
+            product_type: d.product_type.clone(),
+            log_path: d.log_path.clone(),
+            parse_error: d.parse_error.clone(),
+            log_updated_at: d.log_updated_at.clone(),
+            epoch_interval_seconds: recent_epoch_interval(&d.history),
+            id: d.id.clone(),
+            started_at: d.started_at.clone(),
+            output_dir: d.output_dir.clone(),
+            process_id: d.process_id,
+            engine_commit: d.engine_commit.clone(),
+            heartbeat: d.heartbeat.clone(),
+            metrics: d.metrics.clone(),
+            error: d.error.clone(),
+            reference_xyz: d.reference_xyz,
+            received_epochs: d.received_epochs,
+            solution_mode: d.solution_mode.clone(),
+            log_version: d.log_version,
+            engine_build_id: d.engine_build_id.clone(),
+            ntrip_log_path: d.ntrip_log_path.clone(),
+            product_log_path: d.product_log_path.clone(),
+            status_error: d.status_error.clone(),
+            recording_files: d.recording_files.clone(),
+            ..Default::default()
+        }
+    }
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
         let mut d = self.data.lock().unwrap();
@@ -291,8 +315,7 @@ impl RealtimeRuntime {
     }
     fn log(&self, line: String) {
         let mut d = self.data.lock().unwrap();
-        d.logs
-            .push(json!({"time":Utc::now().to_rfc3339(),"line":line}));
+        d.logs.push(json!({"time":Utc::now().to_rfc3339(),"line":line}));
         if d.logs.len() > 500 {
             d.logs.remove(0);
         }
@@ -312,8 +335,12 @@ impl RealtimeRuntime {
             values.insert(k.clone(), v.clone());
         }
         validate(&values)?;
-        let record_only=values.get("GNSS_PMode").is_some_and(|v|v=="0");
-        if request.label.as_ref().is_some_and(|v|v.chars().count()>512||v.contains(['\r','\n']))||request.station.as_ref().is_some_and(|v|v.chars().count()>80||v.contains(['\r','\n'])){return Err("方案名须为 512 字以内、测站分组为 80 字以内的单行文字".into());}
+        let record_only = values.get("GNSS_PMode").is_some_and(|v| v == "0");
+        if request.label.as_ref().is_some_and(|v| v.chars().count() > 512 || v.contains(['\r', '\n']))
+            || request.station.as_ref().is_some_and(|v| v.chars().count() > 80 || v.contains(['\r', '\n']))
+        {
+            return Err("方案名须为 512 字以内、测站分组为 80 字以内的单行文字".into());
+        }
         let reference = if record_only { None } else { reference(&values)? };
         let manifest: Value = serde_json::from_slice(
             &fs::read(self.engine_dir.join("manifest.json")).map_err(|e| e.to_string())?,
@@ -341,41 +368,42 @@ impl RealtimeRuntime {
         let mut run_text = String::new();
         for line in text.lines() {
             let key = line.split_once('=').map(|(k, _)| k.trim()).unwrap_or("");
-            if key.starts_with("RTIE_")
-                || key.starts_with("UPLOAD_")
-                || key.starts_with("IPSCLIENT_")
-            {
+            if key.starts_with("RTIE_") || key.starts_with("UPLOAD_") || key.starts_with("IPSCLIENT_") {
                 continue;
             }
             run_text.push_str(line);
             run_text.push('\n');
         }
-        run_text
-            .push_str("\n# FINDYOU session overrides; source configuration remains unchanged.\n");
+        run_text.push_str("\n# FINDYOU session overrides; source configuration remains unchanged.\n");
         for (k, v) in &request.values {
             run_text.push_str(&format!("{k} = {v};\n"));
         }
         // Side effects stay inside this session; never share mutable ephemeris caches.
         let config_path = Path::new(&request.source_path);
         let parent = config_path.parent().unwrap_or(Path::new("."));
-        let repo = if parent
-            .file_name()
-            .is_some_and(|n| n == "opt" || n == "Data")
-        {
+        let repo = if parent.file_name().is_some_and(|n| n == "opt" || n == "Data") {
             parent.parent().unwrap_or(parent)
         } else {
             parent
         };
         let (dcb, warnings) = options::dcb_overrides(&values, repo);
-        for (k,v) in dcb {run_text.push_str(&format!("{k} = {v};\n"));}
-        for warning in warnings {run_text.push_str(&format!("# {warning}\n"));}
+        for (k, v) in dcb {
+            run_text.push_str(&format!("{k} = {v};\n"));
+        }
+        for warning in warnings {
+            run_text.push_str(&format!("# {warning}\n"));
+        }
         let cache = run.join("eph_cache");
         fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
         if let Some(old) = values.get("GNSS_ShareEPHPath").filter(|s| !s.is_empty() && !record_only) {
             let old = options::absolute(repo, old);
             copy_cache(&old, &cache)?;
         }
-        if let Some(atx) = values.get("GNSS_ATXFile").filter(|s| !s.is_empty() && matches!(values.get("GNSS_PMode").map(String::as_str),Some("2"|"3")) && values.get("GNSS_bUsePPPAntenna").is_none_or(|v|v.eq_ignore_ascii_case("ON")||v=="1")) {
+        if let Some(atx) = values.get("GNSS_ATXFile").filter(|s| {
+            !s.is_empty()
+                && matches!(values.get("GNSS_PMode").map(String::as_str), Some("2" | "3"))
+                && values.get("GNSS_bUsePPPAntenna").is_none_or(|v| v.eq_ignore_ascii_case("ON") || v == "1")
+        }) {
             let p = options::absolute(repo, atx);
             if !p.is_file() {
                 return Err("ANTEX 文件不存在".into());
@@ -393,27 +421,36 @@ impl RealtimeRuntime {
         let secrets: Vec<_> = values
             .iter()
             .filter(|(k, v)| {
-                (k.contains("Password") || k.contains("UserID") || k.contains("Token"))
-                    && !v.is_empty()
+                (k.contains("Password") || k.contains("UserID") || k.contains("Token")) && !v.is_empty()
             })
             .map(|(_, v)| v.clone())
             .collect();
         self.stop.store(false, Ordering::SeqCst);
         *d = LiveSnapshot {
-            label:request.label.unwrap_or_default(),
-            station:request.station.filter(|s|!s.trim().is_empty()).unwrap_or_else(||values.get("ROVE_NTRIP_Mountpoint").cloned().unwrap_or_else(||"未指定测站".into())),
-            source_path:options::display_path(config_path),
-            analysis_config:results::config_summary(&run_text),
+            label: request.label.unwrap_or_default(),
+            station: request.station.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
+                values.get("ROVE_NTRIP_Mountpoint").cloned().unwrap_or_else(|| "未指定测站".into())
+            }),
+            source_path: options::display_path(config_path),
+            analysis_config: results::config_summary(&run_text),
             state: "starting".into(),
-            solution_mode:if record_only{"RECORD".into()}else if matches!(values.get("GNSS_PMode").map(String::as_str),Some("6"|"7"|"8")){"RTK".into()}else{"PPP".into()},
-            log_version:4,
-            engine_build_id:manifest["build_id"].as_str().unwrap_or_default().into(),
-            config_name: config_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into(),
-            product_type: if record_only{"RECORD".into()}else if matches!(values.get("GNSS_PMode").map(String::as_str),Some("6"|"7"|"8")){"RTK".into()}else{values.get("PRODUCT_NTRIP_Type").cloned().unwrap_or_else(||"SSR".into())},
+            solution_mode: if record_only {
+                "RECORD".into()
+            } else if matches!(values.get("GNSS_PMode").map(String::as_str), Some("6" | "7" | "8")) {
+                "RTK".into()
+            } else {
+                "PPP".into()
+            },
+            log_version: 4,
+            engine_build_id: manifest["build_id"].as_str().unwrap_or_default().into(),
+            config_name: config_path.file_name().unwrap_or_default().to_string_lossy().into(),
+            product_type: if record_only {
+                "RECORD".into()
+            } else if matches!(values.get("GNSS_PMode").map(String::as_str), Some("6" | "7" | "8")) {
+                "RTK".into()
+            } else {
+                values.get("PRODUCT_NTRIP_Type").cloned().unwrap_or_else(|| "SSR".into())
+            },
             id: id.clone(),
             started_at: Utc::now().to_rfc3339(),
             output_dir: options::display_path(&run),
@@ -431,12 +468,16 @@ impl RealtimeRuntime {
         });
         Ok(id)
     }
-    fn product_metric(&self,snapshot:&Value) {
-        if let Some(metric)=results::product_metric(snapshot) {
-            let mut d=self.data.lock().unwrap();
-            if d.product_history.last().is_some_and(|m|m["time"]==metric["time"]){d.product_history.pop();}
+    fn product_metric(&self, snapshot: &Value) {
+        if let Some(metric) = results::product_metric(snapshot) {
+            let mut d = self.data.lock().unwrap();
+            if d.product_history.last().is_some_and(|m| m["time"] == metric["time"]) {
+                d.product_history.pop();
+            }
             d.product_history.push(metric);
-            if d.product_history.len()>3600{d.product_history.remove(0);}
+            if d.product_history.len() > 3600 {
+                d.product_history.remove(0);
+            }
         }
     }
     fn run(
@@ -459,10 +500,14 @@ impl RealtimeRuntime {
                 cmd.env_remove(k);
             }
         }
-        let manifest:Value=serde_json::from_slice(&fs::read(self.engine_dir.join("manifest.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-        let snapshot=self.data.lock().unwrap();
-        if snapshot.solution_mode!="RECORD"&&manifest["capabilities"]["satellite_snapshot"]==2 {
-            cmd.env("IPSPOS_DIAG_SATELLITE_DIR",options::engine_path(&run)?).env("IPSPOS_DIAG_SATELLITE_RUN_ID",&snapshot.id);
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(self.engine_dir.join("manifest.json")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let snapshot = self.data.lock().unwrap();
+        if snapshot.solution_mode != "RECORD" && manifest["capabilities"]["satellite_snapshot"] == 2 {
+            cmd.env("IPSPOS_DIAG_SATELLITE_DIR", options::engine_path(&run)?)
+                .env("IPSPOS_DIAG_SATELLITE_RUN_ID", &snapshot.id);
         }
         drop(snapshot);
         #[cfg(windows)]
@@ -470,9 +515,7 @@ impl RealtimeRuntime {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000);
         }
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("IPSClient 启动失败：{e}"))?;
+        let mut child = cmd.spawn().map_err(|e| format!("IPSClient 启动失败：{e}"))?;
         let job = match Job::attach(&child) {
             Ok(j) => j,
             Err(e) => {
@@ -486,16 +529,23 @@ impl RealtimeRuntime {
             d.process_id = Some(child.id());
             d.state = "running".into();
         }
-        let record_only=self.data.lock().unwrap().solution_mode=="RECORD";
-        self.log(if record_only {"IPSClient 原始流录制已启动；模式 0，不执行定位解算。"}else{"IPSClient 真实实时会话已启动；产品与观测由本机 NTRIP 接收。"}.into());
-        let mut solution_tail=LineTail::default();
-        let mut console_tail=LineTail::default();
-        let mut ntrip_tail=LineTail::default();
-        let mut product_tail=LineTail::default();
-        let mut ntrip=crate::status_log::Parser::new("NTRIP");
-        let mut product=crate::status_log::Parser::new("PRODUCT");
-        let mut ntrip_path=None;
-        let mut product_path=None;
+        let record_only = self.data.lock().unwrap().solution_mode == "RECORD";
+        self.log(
+            if record_only {
+                "IPSClient 原始流录制已启动；模式 0，不执行定位解算。"
+            } else {
+                "IPSClient 真实实时会话已启动；产品与观测由本机 NTRIP 接收。"
+            }
+            .into(),
+        );
+        let mut solution_tail = LineTail::default();
+        let mut console_tail = LineTail::default();
+        let mut ntrip_tail = LineTail::default();
+        let mut product_tail = LineTail::default();
+        let mut ntrip = crate::status_log::Parser::new("NTRIP");
+        let mut product = crate::status_log::Parser::new("PRODUCT");
+        let mut ntrip_path = None;
+        let mut product_path = None;
         let mut parser = LiveLog::default();
         parser.origin = reference;
         let mut log_path = None;
@@ -504,40 +554,55 @@ impl RealtimeRuntime {
         let mut stopped = None;
         let terminal = loop {
             // Check exit before draining files so the final flushed records cannot be missed.
-            let exit_status=child.try_wait().map_err(|e|e.to_string())?;
+            let exit_status = child.try_wait().map_err(|e| e.to_string())?;
             if self.stop.load(Ordering::SeqCst) && stopped.is_none() {
                 fs::write(&stop, b"stop").map_err(|e| e.to_string())?;
                 stopped = Some(Instant::now());
             }
-            if ntrip_path.is_none(){ntrip_path=crate::status_log::find(&run,"NTRIP");}
-            if product_path.is_none(){product_path=crate::status_log::find(&run,"PRODUCT");}
-            let status_read=(||->Result<(),String>{
-                if let Some(path)=&ntrip_path {
-                    let (reset,lines)=ntrip_tail.read(path)?;
-                    if reset{ntrip=crate::status_log::Parser::new("NTRIP");}
-                    for line in lines{ntrip.line(&line)?;}
-                }
-                if let Some(path)=&product_path {
-                    let (reset,lines)=product_tail.read(path)?;
-                    if reset{product=crate::status_log::Parser::new("PRODUCT");self.data.lock().unwrap().product_history.clear();}
+            if ntrip_path.is_none() {
+                ntrip_path = crate::status_log::find(&run, "NTRIP");
+            }
+            if product_path.is_none() {
+                product_path = crate::status_log::find(&run, "PRODUCT");
+            }
+            let status_read = (|| -> Result<(), String> {
+                if let Some(path) = &ntrip_path {
+                    let (reset, lines) = ntrip_tail.read(path)?;
+                    if reset {
+                        ntrip = crate::status_log::Parser::new("NTRIP");
+                    }
                     for line in lines {
-                        if let Some(previous)=product.line(&line)? {
+                        ntrip.line(&line)?;
+                    }
+                }
+                if let Some(path) = &product_path {
+                    let (reset, lines) = product_tail.read(path)?;
+                    if reset {
+                        product = crate::status_log::Parser::new("PRODUCT");
+                        self.data.lock().unwrap().product_history.clear();
+                    }
+                    for line in lines {
+                        if let Some(previous) = product.line(&line)? {
                             self.product_metric(&previous);
                         }
                     }
-                    if let Some(current)=product.snapshot(){self.product_metric(&current);}
+                    if let Some(current) = product.snapshot() {
+                        self.product_metric(&current);
+                    }
                 }
                 Ok(())
             })();
             {
-                let mut d=self.data.lock().unwrap();
-                if d.solution_mode=="RECORD" {d.recording_files=recording_files(&run);}
-                d.ntrip_log_path=ntrip_path.as_deref().map(options::display_path);
-                d.product_log_path=product_path.as_deref().map(options::display_path);
-                d.heartbeat=crate::status_log::heartbeat(&ntrip,&product);
-                d.status_error=status_read.err();
+                let mut d = self.data.lock().unwrap();
+                if d.solution_mode == "RECORD" {
+                    d.recording_files = recording_files(&run);
+                }
+                d.ntrip_log_path = ntrip_path.as_deref().map(options::display_path);
+                d.product_log_path = product_path.as_deref().map(options::display_path);
+                d.heartbeat = crate::status_log::heartbeat(&ntrip, &product);
+                d.status_error = status_read.err();
             }
-            if log_path.is_none() && self.data.lock().unwrap().solution_mode!="RECORD" {
+            if log_path.is_none() && self.data.lock().unwrap().solution_mode != "RECORD" {
                 log_path = results::find_solution_log(&run);
                 if let Some(path) = &log_path {
                     self.data.lock().unwrap().log_path = Some(options::display_path(path));
@@ -552,10 +617,10 @@ impl RealtimeRuntime {
                     d.epochs.clear();
                     d.history.clear();
                     d.reference_xyz = None;
-                    d.received_epochs=0;
-                    d.metrics=Value::Null;
-                    d.parse_error=None;
-                    d.log_updated_at=None;
+                    d.received_epochs = 0;
+                    d.metrics = Value::Null;
+                    d.parse_error = None;
+                    d.log_updated_at = None;
                 }
                 for line in lines {
                     match parser.line(&line) {
@@ -618,12 +683,7 @@ impl RealtimeRuntime {
             }
             if let Some(status) = exit_status {
                 let mut d = self.snapshot();
-                d.state = if stopped.is_some() {
-                    "stopped"
-                } else {
-                    "failed"
-                }
-                .into();
+                d.state = if stopped.is_some() { "stopped" } else { "failed" }.into();
                 if stopped.is_none() {
                     d.error = Some(format!(
                         "IPSClient 已退出（{}）；请检查连接及配置日志",
@@ -646,73 +706,141 @@ impl RealtimeRuntime {
             serde_json::to_vec_pretty(&terminal).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        if let Some(lib)=&self.library {if terminal.buffered_epochs>0 {if let Err(e)=lib.import(vec![options::display_path(&run)]){self.log(format!("结果文件已保留，历史索引未写入：{e}"));}}}
+        if let Some(lib) = &self.library {
+            if terminal.buffered_epochs > 0 {
+                if let Err(e) = lib.import(vec![options::display_path(&run)]) {
+                    self.log(format!("结果文件已保留，历史索引未写入：{e}"));
+                }
+            }
+        }
         // Keep start() blocked until this run has finished all file/index work.
         // Publishing a terminal state earlier lets an immediate restart replace its metadata.
-        let mut d=self.data.lock().unwrap();d.state=terminal.state;d.error=terminal.error;
+        let mut d = self.data.lock().unwrap();
+        d.state = terminal.state;
+        d.error = terminal.error;
         Ok(())
     }
 }
 fn validate(v: &BTreeMap<String, String>) -> Result<(), String> {
     options::check_solver_options(v)?;
-    let mode=v.get("GNSS_PMode").map(String::as_str).unwrap_or("");
-    let record_only=mode=="0";
-    let rtk=matches!(mode,"6"|"7"|"8");
-    if !record_only&&!rtk&&!matches!(mode,"2"|"3"){return Err("实时支持仅录制(0)、PPP(2/3)及 RTK(6/7/8)".into());}
-    let kind=v.get("PRODUCT_NTRIP_Type").map(String::as_str).unwrap_or("SSR");
-    if !record_only&&!rtk && !matches!(kind,"SSR"|"HAS"|"B2B"){return Err("当前 PPP 引擎支持 SSR、HAS、B2B".into());}
-    if !record_only&&!rtk&&matches!(kind,"HAS"|"B2B") {
-        for role in ["ROVE","BIAS","ATMO"]{
-            if role!="ROVE"&&v.get(&format!("{role}_NTRIP_Mountpoint")).is_none_or(|s|s.is_empty()){continue;}
-            if v.get(&format!("{role}_NTRIP_DataType")).is_some_and(|s|s.split('|').any(|p|["ORB","CLK","CODE_OSB","PHASE_OSB"].contains(&p.trim()))){return Err(format!("{kind} 不可混用 {role} 流的 SSR 改正；广播星历请选择 EPH"));}
+    let mode = v.get("GNSS_PMode").map(String::as_str).unwrap_or("");
+    let record_only = mode == "0";
+    let rtk = matches!(mode, "6" | "7" | "8");
+    if !record_only && !rtk && !matches!(mode, "2" | "3") {
+        return Err("实时支持仅录制(0)、PPP(2/3)及 RTK(6/7/8)".into());
+    }
+    let kind = v.get("PRODUCT_NTRIP_Type").map(String::as_str).unwrap_or("SSR");
+    if !record_only && !rtk && !matches!(kind, "SSR" | "HAS" | "B2B") {
+        return Err("当前 PPP 引擎支持 SSR、HAS、B2B".into());
+    }
+    if !record_only && !rtk && matches!(kind, "HAS" | "B2B") {
+        for role in ["ROVE", "BIAS", "ATMO"] {
+            if role != "ROVE" && v.get(&format!("{role}_NTRIP_Mountpoint")).is_none_or(|s| s.is_empty()) {
+                continue;
+            }
+            if v.get(&format!("{role}_NTRIP_DataType")).is_some_and(|s| {
+                s.split('|').any(|p| ["ORB", "CLK", "CODE_OSB", "PHASE_OSB"].contains(&p.trim()))
+            }) {
+                return Err(format!("{kind} 不可混用 {role} 流的 SSR 改正；广播星历请选择 EPH"));
+            }
         }
     }
     for role in ROLES {
-        if !record_only&&((rtk&&!["ROVE","BASE"].contains(role))||(!rtk&&*role=="BASE")){continue;}
-        let mount=v.get(&format!("{role}_NTRIP_Mountpoint")).map(String::as_str).unwrap_or("");
-        if record_only&&mount.is_empty(){continue;}
-        if ["BIAS","ATMO"].contains(role)&&mount.is_empty(){continue;}
-        let host=v.get(&format!("{role}_NTRIP_CasterHost")).filter(|s|!s.is_empty())
-            .or_else(||if ["BIAS","ATMO"].contains(role){v.get("PRODUCT_NTRIP_CasterHost")}else{None});
-        if host.is_none_or(|s|s.is_empty())||mount.is_empty(){return Err(format!("请填写 {role} 地址和挂载点"));}
-        if v.get(&format!("{role}_NTRIP_Port")).and_then(|s|s.parse::<u16>().ok()).is_none_or(|p|p==0){return Err(format!("{role} 端口须为 1–65535"));}
+        if !record_only && ((rtk && !["ROVE", "BASE"].contains(role)) || (!rtk && *role == "BASE")) {
+            continue;
+        }
+        let mount = v.get(&format!("{role}_NTRIP_Mountpoint")).map(String::as_str).unwrap_or("");
+        if record_only && mount.is_empty() {
+            continue;
+        }
+        if ["BIAS", "ATMO"].contains(role) && mount.is_empty() {
+            continue;
+        }
+        let host = v.get(&format!("{role}_NTRIP_CasterHost")).filter(|s| !s.is_empty()).or_else(|| {
+            if ["BIAS", "ATMO"].contains(role) {
+                v.get("PRODUCT_NTRIP_CasterHost")
+            } else {
+                None
+            }
+        });
+        if host.is_none_or(|s| s.is_empty()) || mount.is_empty() {
+            return Err(format!("请填写 {role} 地址和挂载点"));
+        }
+        if v.get(&format!("{role}_NTRIP_Port")).and_then(|s| s.parse::<u16>().ok()).is_none_or(|p| p == 0) {
+            return Err(format!("{role} 端口须为 1–65535"));
+        }
     }
-    if record_only&&ROLES.iter().all(|r|v.get(&format!("{r}_NTRIP_Mountpoint")).is_none_or(|s|s.is_empty())){return Err("仅录制模式至少配置一路挂载点".into());}
-    if let Some(sample)=v.get("GNSS_RoveSampleTime").filter(|_|!record_only){
-        if sample.parse::<f64>().ok().filter(|n|n.is_finite()&&*n>0.&&*n<=3600.).is_none(){return Err("采样间隔须大于 0 且不超过 3600 秒".into());}
+    if record_only
+        && ROLES.iter().all(|r| v.get(&format!("{r}_NTRIP_Mountpoint")).is_none_or(|s| s.is_empty()))
+    {
+        return Err("仅录制模式至少配置一路挂载点".into());
+    }
+    if let Some(sample) = v.get("GNSS_RoveSampleTime").filter(|_| !record_only) {
+        if sample.parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0. && *n <= 3600.).is_none() {
+            return Err("采样间隔须大于 0 且不超过 3600 秒".into());
+        }
     }
     Ok(())
 }
 
-fn recording_files(run:&Path)->Vec<RecordingFile>{
-    let mut files=Vec::new();
-    let Ok(entries)=fs::read_dir(run) else{return files;};
-    for entry in entries.flatten(){
-        let directory=entry.path();
-        if !directory.is_dir()||!entry.file_name().to_string_lossy().starts_with("SESSION_"){continue;}
-        let Ok(children)=fs::read_dir(directory) else{continue;};
-        for file in children.flatten(){
-            let path=file.path();
-            if !path.extension().is_some_and(|e|e.eq_ignore_ascii_case("rtcm3")){continue;}
-            let Ok(meta)=file.metadata() else{continue;};
-            if !meta.is_file(){continue;}
-            let name=file.file_name().to_string_lossy().to_string();
-            let prefix=name.split('_').next().unwrap_or("");
-            let role=if prefix=="PROD"{"PRODUCT"}else{prefix}.to_string();
-            if ROLES.contains(&role.as_str()){files.push(RecordingFile{name,path:options::display_path(&path),role,bytes:meta.len()});}
+fn recording_files(run: &Path) -> Vec<RecordingFile> {
+    let mut files = Vec::new();
+    let Ok(entries) = fs::read_dir(run) else {
+        return files;
+    };
+    for entry in entries.flatten() {
+        let directory = entry.path();
+        if !directory.is_dir() || !entry.file_name().to_string_lossy().starts_with("SESSION_") {
+            continue;
+        }
+        let Ok(children) = fs::read_dir(directory) else {
+            continue;
+        };
+        for file in children.flatten() {
+            let path = file.path();
+            if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("rtcm3")) {
+                continue;
+            }
+            let Ok(meta) = file.metadata() else {
+                continue;
+            };
+            if !meta.is_file() {
+                continue;
+            }
+            let name = file.file_name().to_string_lossy().to_string();
+            let prefix = name.split('_').next().unwrap_or("");
+            let role = if prefix == "PROD" { "PRODUCT" } else { prefix }.to_string();
+            if ROLES.contains(&role.as_str()) {
+                files.push(RecordingFile {
+                    name,
+                    path: options::display_path(&path),
+                    role,
+                    bytes: meta.len(),
+                });
+            }
         }
     }
-    files.sort_by(|a,b|a.name.cmp(&b.name));files
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    files
 }
 
 #[tauri::command]
-pub fn create_live_document(values:BTreeMap<String,String>,paths:tauri::State<'_,crate::paths::RuntimePaths>)->Result<LiveDocument,String>{
+pub fn create_live_document(
+    values: BTreeMap<String, String>,
+    paths: tauri::State<'_, crate::paths::RuntimePaths>,
+) -> Result<LiveDocument, String> {
     validate(&values)?;
-    if values.iter().any(|(k,v)|!allowed(k)||v.contains([';','\r','\n'])||v.len()>1024){return Err("实时配置字段或值无效".into());}
-    let dir=Path::new(&paths.root).join("config/realtime-drafts");fs::create_dir_all(&dir).map_err(|e|e.to_string())?;
-    let path=dir.join(format!("manual-{}.opt",uuid::Uuid::new_v4()));
-    let text=values.iter().map(|(k,v)|format!("{k} = {v};\n")).collect::<String>();fs::write(&path,text).map_err(|e|e.to_string())?;
-    Ok(LiveDocument{source_path:options::display_path(&path),name:"手动实时配置.opt".into(),values})
+    if values.iter().any(|(k, v)| !allowed(k) || v.contains([';', '\r', '\n']) || v.len() > 1024) {
+        return Err("实时配置字段或值无效".into());
+    }
+    let dir = Path::new(&paths.root).join("config/realtime-drafts");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("manual-{}.opt", uuid::Uuid::new_v4()));
+    let text = values.iter().map(|(k, v)| format!("{k} = {v};\n")).collect::<String>();
+    fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok(LiveDocument {
+        source_path: options::display_path(&path), name: "手动实时配置.opt".into(), values
+    })
 }
 fn copy_cache(source: &Path, target: &Path) -> Result<(), String> {
     if !source.is_dir() {
@@ -734,10 +862,7 @@ fn find_ulog(root: &Path) -> Option<PathBuf> {
             if let Some(found) = find_ulog(&p) {
                 return Some(found);
             }
-        } else if p
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("ulog"))
-        {
+        } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("ulog")) {
             return Some(p);
         }
     }
@@ -756,10 +881,7 @@ fn reference(values: &BTreeMap<String, String>) -> Result<Option<[f64; 3]>, Stri
     if v == [0., 0., 0.] {
         return Ok(None);
     }
-    if v.len() != 3
-        || v.iter().any(|n| !n.is_finite())
-        || v.iter().map(|n| n * n).sum::<f64>().sqrt() < 1e6
-    {
+    if v.len() != 3 || v.iter().any(|n| !n.is_finite()) || v.iter().map(|n| n * n).sum::<f64>().sqrt() < 1e6 {
         return Err("参考坐标需要有效 ECEF XYZ，单位米".into());
     }
     Ok(Some([v[0], v[1], v[2]]))
@@ -772,20 +894,29 @@ mod tests {
     fn record_only_accepts_any_configured_role_and_requires_one_valid_endpoint() {
         let mut v=options::parse("GNSS_PMode=0;\nPRODUCT_NTRIP_CasterHost=127.0.0.1;\nPRODUCT_NTRIP_Port=2101;\nPRODUCT_NTRIP_Mountpoint=raw;\nPRODUCT_NTRIP_Type=HAS;\nGNSS_RoveSampleTime=0;");
         assert!(validate(&v).is_ok());
-        v.insert("PRODUCT_NTRIP_Port".into(),"65536".into());assert!(validate(&v).is_err());
-        v.insert("PRODUCT_NTRIP_Mountpoint".into(),"".into());assert!(validate(&v).is_err());
+        v.insert("PRODUCT_NTRIP_Port".into(), "65536".into());
+        assert!(validate(&v).is_err());
+        v.insert("PRODUCT_NTRIP_Mountpoint".into(), "".into());
+        assert!(validate(&v).is_err());
     }
     #[test]
     fn recording_files_stay_in_session_and_survive_overview() {
-        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../runtime/cache/test-recording").join(uuid::Uuid::new_v4().to_string());
-        let session=root.join("SESSION_test");fs::create_dir_all(&session).unwrap();
-        fs::write(session.join("PROD_mount_epoch.rtcm3"),[1,2,3]).unwrap();
-        fs::write(session.join("ROVE_mount_epoch.rtcm3"),[4,5]).unwrap();
-        fs::write(session.join("ROVE_not_raw.log"),"log").unwrap();
-        fs::write(root.join("ROVE_outside.rtcm3"),"outside").unwrap();
-        let files=recording_files(&root);assert_eq!(files.len(),2);assert_eq!(files[0].role,"PRODUCT");assert_eq!(files[0].bytes,3);
-        let runtime=RealtimeRuntime::new(PathBuf::new(),root);runtime.data.lock().unwrap().recording_files=files;
-        assert_eq!(runtime.summary().recording_files.len(),2);
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../runtime/cache/test-recording")
+            .join(uuid::Uuid::new_v4().to_string());
+        let session = root.join("SESSION_test");
+        fs::create_dir_all(&session).unwrap();
+        fs::write(session.join("PROD_mount_epoch.rtcm3"), [1, 2, 3]).unwrap();
+        fs::write(session.join("ROVE_mount_epoch.rtcm3"), [4, 5]).unwrap();
+        fs::write(session.join("ROVE_not_raw.log"), "log").unwrap();
+        fs::write(root.join("ROVE_outside.rtcm3"), "outside").unwrap();
+        let files = recording_files(&root);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].role, "PRODUCT");
+        assert_eq!(files[0].bytes, 3);
+        let runtime = RealtimeRuntime::new(PathBuf::new(), root);
+        runtime.data.lock().unwrap().recording_files = files;
+        assert_eq!(runtime.summary().recording_files.len(), 2);
     }
     #[test]
     fn realtime_aliases_keep_assignment_order_and_exclude_gateway() {
@@ -812,59 +943,146 @@ mod tests {
     fn rtk_requires_its_own_base_and_does_not_require_ppp_products() {
         let mut v=options::parse("GNSS_PMode=6;\nROVE_NTRIP_CasterHost=127.0.0.1;\nROVE_NTRIP_Port=2101;\nROVE_NTRIP_Mountpoint=rover;\nPRODUCT_NTRIP_Type=unused;");
         assert!(validate(&v).unwrap_err().contains("BASE"));
-        v.extend(options::parse("BASE_NTRIP_CasterHost=127.0.0.1;\nBASE_NTRIP_Port=2102;\nBASE_NTRIP_Mountpoint=base;"));
-        for mode in ["6","7","8"] {
-            v.insert("GNSS_PMode".into(),mode.into());assert!(validate(&v).is_ok());
+        v.extend(options::parse(
+            "BASE_NTRIP_CasterHost=127.0.0.1;\nBASE_NTRIP_Port=2102;\nBASE_NTRIP_Mountpoint=base;",
+        ));
+        for mode in ["6", "7", "8"] {
+            v.insert("GNSS_PMode".into(), mode.into());
+            assert!(validate(&v).is_ok());
         }
-        v.insert("BASE_NTRIP_Port".into(),"0".into());assert!(validate(&v).is_err());
+        v.insert("BASE_NTRIP_Port".into(), "0".into());
+        assert!(validate(&v).is_err());
     }
 }
 
 impl RealtimeRuntime {
- pub fn satellites(&self,run_id:&str,enabled:bool)->Result<Value,String>{
-  let (id,state,directory)={let d=self.data.lock().unwrap();(d.id.clone(),d.state.clone(),d.output_dir.clone())};
-  if id!=run_id||directory.is_empty(){return Err("会话已改变".into());}
-  let root=Path::new(&directory);let request=root.join("satellites.request");
-  if !enabled{let _=fs::remove_file(request);return Ok(Value::Null);}
-  if state!="running"{return Ok(Value::Null);}
-  let capability:Value=serde_json::from_slice(&fs::read(self.engine_dir.join("manifest.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-  if capability["capabilities"]["satellite_snapshot"]!=2{return Err("此引擎不支持卫星快照".into());}
-  fs::write(&request,(Utc::now().timestamp()+5).to_string()).map_err(|e|e.to_string())?;
-  let file=root.join("satellites.json");let Ok(meta)=fs::metadata(&file) else{return Ok(Value::Null);};
-  if meta.len()>262144{return Err("卫星快照超过大小限制".into());}
-  use std::io::Read;
-  let mut bytes=Vec::with_capacity(meta.len() as usize);
-  fs::File::open(file).map_err(|e|e.to_string())?.take(262145).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
-  if bytes.len()>262144{return Err("卫星快照超过大小限制".into());}
-  let value:Value=serde_json::from_slice(&bytes).map_err(|e|e.to_string())?;
-  validate_satellite_snapshot(&value,run_id)?;Ok(value)
- }
+    pub fn satellites(&self, run_id: &str, enabled: bool) -> Result<Value, String> {
+        let (id, state, directory) = {
+            let d = self.data.lock().unwrap();
+            (d.id.clone(), d.state.clone(), d.output_dir.clone())
+        };
+        if id != run_id || directory.is_empty() {
+            return Err("会话已改变".into());
+        }
+        let root = Path::new(&directory);
+        let request = root.join("satellites.request");
+        if !enabled {
+            let _ = fs::remove_file(request);
+            return Ok(Value::Null);
+        }
+        if state != "running" {
+            return Ok(Value::Null);
+        }
+        let capability: Value = serde_json::from_slice(
+            &fs::read(self.engine_dir.join("manifest.json")).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if capability["capabilities"]["satellite_snapshot"] != 2 {
+            return Err("此引擎不支持卫星快照".into());
+        }
+        fs::write(&request, (Utc::now().timestamp() + 5).to_string()).map_err(|e| e.to_string())?;
+        let file = root.join("satellites.json");
+        let Ok(meta) = fs::metadata(&file) else {
+            return Ok(Value::Null);
+        };
+        if meta.len() > 262144 {
+            return Err("卫星快照超过大小限制".into());
+        }
+        use std::io::Read;
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        fs::File::open(file)
+            .map_err(|e| e.to_string())?
+            .take(262145)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() > 262144 {
+            return Err("卫星快照超过大小限制".into());
+        }
+        let value: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        validate_satellite_snapshot(&value, run_id)?;
+        Ok(value)
+    }
 }
-fn validate_satellite_snapshot(value:&Value,run_id:&str)->Result<(),String>{
- if value["schemaVersion"]!=1||value["runId"]!=run_id||value["sequence"].as_u64().is_none_or(|n|n==0)||value["week"].as_u64().is_none_or(|n|n>9999)||value["publishedAt"].as_i64().is_none_or(|n|n<=0||n>Utc::now().timestamp()+10)||value["tow"].as_f64().is_none_or(|v|!v.is_finite()||!(0.0..604800.0).contains(&v)){return Err("卫星快照版本、会话或历元无效".into());}
- let rows=value["satellites"].as_array().ok_or("卫星快照缺少列表")?;if rows.len()>512{return Err("卫星数量超限".into());}
- let mut seen=std::collections::HashSet::new();
- for row in rows{let prn=row["prn"].as_str().ok_or("无效 PRN")?;if prn.len()!=3||!matches!(prn.as_bytes()[0],b'G'|b'C'|b'E'|b'R'|b'J')||!prn.as_bytes()[1..].iter().all(u8::is_ascii_digit)||!seen.insert(prn){return Err("无效或重复 PRN".into());}
-  for (key,min,max) in [("azimuth",0.,360.),("elevation",0.,90.)]{if !row[key].is_null()&&row[key].as_f64().is_none_or(|v|!v.is_finite()||v<min||v>max){return Err("无效卫星角度".into());}}
-  let system=match prn.as_bytes()[0]{b'G'=>"GPS",b'C'=>"BDS",b'E'=>"GAL",b'R'=>"GLO",_=>"QZSS"};
-  if row["system"]!=system||(!row["used"].is_null()&&!row["used"].is_boolean()){return Err("无效星座或参与状态".into());}
-  let signals=row["signals"].as_array().ok_or("无效卫星信号列表")?;if signals.len()>16{return Err("卫星信号数量超限".into());}
-  let mut slots=std::collections::HashSet::new();
-  for signal in signals{
-   if signal["slot"].as_u64().is_none_or(|n|n>15||!slots.insert(n))||signal["band"].as_str().is_none_or(|s|s.is_empty()||s.len()>12||!s.bytes().all(|c|c.is_ascii_alphanumeric()))||signal["signal"].as_str().is_none_or(|s|s.len()!=2||!s.bytes().all(|c|c.is_ascii_alphanumeric()))||(!signal["used"].is_null()&&!signal["used"].is_boolean())||(!signal["cn0"].is_null()&&signal["cn0"].as_f64().is_none_or(|n|!n.is_finite()||!(0.0..=100.0).contains(&n))){return Err("无效卫星频点或载噪比".into());}
-  }
- }
- Ok(())
+fn validate_satellite_snapshot(value: &Value, run_id: &str) -> Result<(), String> {
+    if value["schemaVersion"] != 1
+        || value["runId"] != run_id
+        || value["sequence"].as_u64().is_none_or(|n| n == 0)
+        || value["week"].as_u64().is_none_or(|n| n > 9999)
+        || value["publishedAt"].as_i64().is_none_or(|n| n <= 0 || n > Utc::now().timestamp() + 10)
+        || value["tow"].as_f64().is_none_or(|v| !v.is_finite() || !(0.0..604800.0).contains(&v))
+    {
+        return Err("卫星快照版本、会话或历元无效".into());
+    }
+    let rows = value["satellites"].as_array().ok_or("卫星快照缺少列表")?;
+    if rows.len() > 512 {
+        return Err("卫星数量超限".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for row in rows {
+        let prn = row["prn"].as_str().ok_or("无效 PRN")?;
+        if prn.len() != 3
+            || !matches!(prn.as_bytes()[0], b'G' | b'C' | b'E' | b'R' | b'J')
+            || !prn.as_bytes()[1..].iter().all(u8::is_ascii_digit)
+            || !seen.insert(prn)
+        {
+            return Err("无效或重复 PRN".into());
+        }
+        for (key, min, max) in [("azimuth", 0., 360.), ("elevation", 0., 90.)] {
+            if !row[key].is_null() && row[key].as_f64().is_none_or(|v| !v.is_finite() || v < min || v > max) {
+                return Err("无效卫星角度".into());
+            }
+        }
+        let system = match prn.as_bytes()[0] {
+            b'G' => "GPS",
+            b'C' => "BDS",
+            b'E' => "GAL",
+            b'R' => "GLO",
+            _ => "QZSS",
+        };
+        if row["system"] != system || (!row["used"].is_null() && !row["used"].is_boolean()) {
+            return Err("无效星座或参与状态".into());
+        }
+        let signals = row["signals"].as_array().ok_or("无效卫星信号列表")?;
+        if signals.len() > 16 {
+            return Err("卫星信号数量超限".into());
+        }
+        let mut slots = std::collections::HashSet::new();
+        for signal in signals {
+            if signal["slot"].as_u64().is_none_or(|n| n > 15 || !slots.insert(n))
+                || signal["band"].as_str().is_none_or(|s| {
+                    s.is_empty() || s.len() > 12 || !s.bytes().all(|c| c.is_ascii_alphanumeric())
+                })
+                || signal["signal"]
+                    .as_str()
+                    .is_none_or(|s| s.len() != 2 || !s.bytes().all(|c| c.is_ascii_alphanumeric()))
+                || (!signal["used"].is_null() && !signal["used"].is_boolean())
+                || (!signal["cn0"].is_null()
+                    && signal["cn0"].as_f64().is_none_or(|n| !n.is_finite() || !(0.0..=100.0).contains(&n)))
+            {
+                return Err("无效卫星频点或载噪比".into());
+            }
+        }
+    }
+    Ok(())
 }
 
-#[cfg(test)]mod satellite_tests{
- use super::*;
- #[test]fn rejects_partial_wrong_session_and_invalid_signal_snapshots(){
-  let valid=json!({"schemaVersion":1,"runId":"run","sequence":1,"week":2440,"tow":100.,"publishedAt":Utc::now().timestamp(),"satellites":[{"prn":"G01","system":"GPS","azimuth":null,"elevation":null,"used":null,"signals":[{"slot":0,"band":"L1","signal":"1C","cn0":null,"used":null}]}]});
-  assert!(validate_satellite_snapshot(&valid,"run").is_ok());assert!(validate_satellite_snapshot(&valid,"other").is_err());
-  let mut v=valid.clone();v["satellites"][0]["signals"][0]["cn0"]=json!(999.);assert!(validate_satellite_snapshot(&v,"run").is_err());
-  let mut v=valid.clone();v["satellites"][0]["system"]=json!("BDS");assert!(validate_satellite_snapshot(&v,"run").is_err());
-  let mut v=valid.clone();v["satellites"].as_array_mut().unwrap().push(valid["satellites"][0].clone());assert!(validate_satellite_snapshot(&v,"run").is_err());
-  assert!(validate_satellite_snapshot(&json!({"schemaVersion":1}),"run").is_err());
- }
+#[cfg(test)]
+mod satellite_tests {
+    use super::*;
+    #[test]
+    fn rejects_partial_wrong_session_and_invalid_signal_snapshots() {
+        let valid = json!({"schemaVersion":1,"runId":"run","sequence":1,"week":2440,"tow":100.,"publishedAt":Utc::now().timestamp(),"satellites":[{"prn":"G01","system":"GPS","azimuth":null,"elevation":null,"used":null,"signals":[{"slot":0,"band":"L1","signal":"1C","cn0":null,"used":null}]}]});
+        assert!(validate_satellite_snapshot(&valid, "run").is_ok());
+        assert!(validate_satellite_snapshot(&valid, "other").is_err());
+        let mut v = valid.clone();
+        v["satellites"][0]["signals"][0]["cn0"] = json!(999.);
+        assert!(validate_satellite_snapshot(&v, "run").is_err());
+        let mut v = valid.clone();
+        v["satellites"][0]["system"] = json!("BDS");
+        assert!(validate_satellite_snapshot(&v, "run").is_err());
+        let mut v = valid.clone();
+        v["satellites"].as_array_mut().unwrap().push(valid["satellites"][0].clone());
+        assert!(validate_satellite_snapshot(&v, "run").is_err());
+        assert!(validate_satellite_snapshot(&json!({"schemaVersion":1}), "run").is_err());
+    }
 }

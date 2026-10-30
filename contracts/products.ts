@@ -1,3 +1,73 @@
-export interface ProductRequest {observation:string;observationDate?:string;dcbPath?:string;centers:string[];grade:'final'|'rapid'|'ultra'|'rts'|'best';mode:'ar'|'float';motion:'static'|'kinematic';downloadAntenna:boolean;antennaPath:string;localRoot:string;switchSource:boolean;offline:boolean;workers:number;timeout:number;attempts:number}
-export interface ProductTransfer {id:string;status:string;origin?:string;source?:string;path?:string;warnings?:string[];antenna?:{frame:string;sha256:string;lastModified?:string;checkedAt?:string;versionChecked:boolean;explicit:boolean};errors?:{status?:string;source?:string;message?:string}[]}
-export interface ProductRecord {dcb?:{status:string;origin?:string;path?:string;message?:string;errors?:{source?:string;message?:string}[]};job:{id:string;name:string;status:string;createdAt:string;directory:string;error?:string;request:ProductRequest};plan?:{observation?:{start:string;end:string;format:string;systems:string[];antenna?:string;epochs?:number};tasks:Record<string,{kind:string;day:string}>};progress?:{transfers:Record<string,ProductTransfer>};manifest?:{ready:boolean;warnings?:string[];results:{id:string;status:string;bundle?:string;preparationLevel?:'basic'|'complete';effectiveMode?:'ar'|'float';opt?:string;check?:{errors:string[];warnings:string[]};skipped?:{reason:string}[];failed_tasks?:{id:string;status:string}[]}[]};log?:string}
+export interface ProductRequest {
+  observation: string;
+  observationDate?: string;
+  dcbPath?: string;
+  centers: string[];
+  grade: 'final' | 'rapid' | 'ultra' | 'rts' | 'best';
+  mode: 'ar' | 'float';
+  motion: 'static' | 'kinematic';
+  downloadAntenna: boolean;
+  antennaPath: string;
+  localRoot: string;
+  switchSource: boolean;
+  offline: boolean;
+  workers: number;
+  timeout: number;
+  attempts: number;
+}
+export interface ProductTransfer {
+  id: string;
+  status: string;
+  origin?: string;
+  source?: string;
+  path?: string;
+  warnings?: string[];
+  antenna?: {
+    frame: string;
+    sha256: string;
+    lastModified?: string;
+    checkedAt?: string;
+    versionChecked: boolean;
+    explicit: boolean;
+  };
+  errors?: { status?: string; source?: string; message?: string }[];
+}
+export interface ProductRecord {
+  dcb?: {
+    status: string;
+    origin?: string;
+    path?: string;
+    message?: string;
+    errors?: { source?: string; message?: string }[];
+  };
+  job: {
+    id: string;
+    name: string;
+    status: string;
+    createdAt: string;
+    directory: string;
+    error?: string;
+    request: ProductRequest;
+  };
+  plan?: {
+    observation?: { start: string; end: string; format: string; systems: string[]; antenna?: string; epochs?: number };
+    tasks: Record<string, { kind: string; day: string }>;
+  };
+  progress?: { transfers: Record<string, ProductTransfer> };
+  manifest?: {
+    ready: boolean;
+    warnings?: string[];
+    results: {
+      id: string;
+      status: string;
+      bundle?: string;
+      preparationLevel?: 'basic' | 'complete';
+      effectiveMode?: 'ar' | 'float';
+      opt?: string;
+      check?: { errors: string[]; warnings: string[] };
+      skipped?: { reason: string }[];
+      failed_tasks?: { id: string; status: string }[];
+    }[];
+  };
+  log?: string;
+}

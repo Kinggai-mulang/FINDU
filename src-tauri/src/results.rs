@@ -31,7 +31,7 @@ pub struct RealResult {
     pub station: String,
     pub source: String,
     pub epochs: Vec<RealEpoch>,
-    #[serde(default, skip_serializing_if="Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_xyz: Option<[f64; 3]>,
     pub reference_kind: String,
     pub total_rows: usize,
@@ -66,64 +66,130 @@ pub struct RealResult {
     pub client_status: serde_json::Value,
 }
 
-pub fn product_metric(v:&serde_json::Value)->Option<serde_json::Value>{
-    let stamp=v["arrivalUnix"].as_i64()?;let dt=chrono::DateTime::from_timestamp(stamp,0)?;
-    let mut metric=serde_json::Map::new();metric.insert("time".into(),serde_json::json!(dt.to_rfc3339()));
-    for key in ["orbit","clock","code","phase"]{
-        let rows:Vec<_>=v["products"].as_array().into_iter().flatten().filter(|r|r["component"]==key).collect();
-        let counts:Vec<_>=rows.iter().filter_map(|r|r["fresh"].as_u64()).collect();
-        let count=if counts.is_empty(){serde_json::Value::Null}else{serde_json::json!(counts.iter().sum::<u64>())};
-        let age=rows.iter().filter(|r|r["fresh"].as_u64().is_some()).filter_map(|r|r["age"].as_f64())
-            .filter(|v|v.is_finite()).min_by(|a,b|a.abs().total_cmp(&b.abs()));
-        metric.insert(key.into(),count);metric.insert(format!("{key}Age"),serde_json::json!(age));
+pub fn product_metric(v: &serde_json::Value) -> Option<serde_json::Value> {
+    let stamp = v["arrivalUnix"].as_i64()?;
+    let dt = chrono::DateTime::from_timestamp(stamp, 0)?;
+    let mut metric = serde_json::Map::new();
+    metric.insert("time".into(), serde_json::json!(dt.to_rfc3339()));
+    for key in ["orbit", "clock", "code", "phase"] {
+        let rows: Vec<_> =
+            v["products"].as_array().into_iter().flatten().filter(|r| r["component"] == key).collect();
+        let counts: Vec<_> = rows.iter().filter_map(|r| r["fresh"].as_u64()).collect();
+        let count = if counts.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(counts.iter().sum::<u64>())
+        };
+        let age = rows
+            .iter()
+            .filter(|r| r["fresh"].as_u64().is_some())
+            .filter_map(|r| r["age"].as_f64())
+            .filter(|v| v.is_finite())
+            .min_by(|a, b| a.abs().total_cmp(&b.abs()));
+        metric.insert(key.into(), count);
+        metric.insert(format!("{key}Age"), serde_json::json!(age));
     }
     Some(serde_json::Value::Object(metric))
 }
 
 pub fn config_summary(text: &str) -> HashMap<String, String> {
-    crate::options::parse(text).into_iter().filter(|(k,_)| {
-        let lower=k.to_ascii_lowercase();
-        !["password","userid","token","secret","user"].iter().any(|s|lower.contains(s)) &&
-        ((k.starts_with("GNSS_")&&! ["GNSS_FilePath","GNSS_ShareEPHPath"].contains(&k.as_str())) || ["PRODUCT_NTRIP_Type","ROVE_NTRIP_Mountpoint","ROVE_NTRIP_DataType","PRODUCT_NTRIP_DataType","BIAS_NTRIP_DataType","ATMO_NTRIP_DataType"].contains(&k.as_str()))
-    }).collect()
+    crate::options::parse(text)
+        .into_iter()
+        .filter(|(k, _)| {
+            let lower = k.to_ascii_lowercase();
+            !["password", "userid", "token", "secret", "user"].iter().any(|s| lower.contains(s))
+                && ((k.starts_with("GNSS_") && !["GNSS_FilePath", "GNSS_ShareEPHPath"].contains(&k.as_str()))
+                    || [
+                        "PRODUCT_NTRIP_Type",
+                        "ROVE_NTRIP_Mountpoint",
+                        "ROVE_NTRIP_DataType",
+                        "PRODUCT_NTRIP_DataType",
+                        "BIAS_NTRIP_DataType",
+                        "ATMO_NTRIP_DataType",
+                    ]
+                    .contains(&k.as_str()))
+        })
+        .collect()
 }
 
 /// Preserve all current native fields, including signed atmosphere and RTK coordinates.
 pub fn diagnostic(fields: &HashMap<&str, &str>) -> Result<serde_json::Value, String> {
-    let mut m=serde_json::Map::new();
-    for (key,raw) in fields {
-        if *key=="UTC" {continue;}
-        let value=crate::gnss_log::number(key,raw);
-        let decoded=value.map_or_else(|| {
-            if !crate::gnss_log::known(key) && raw.parse::<f64>().is_err() {
-                serde_json::json!(raw)
-            } else {serde_json::Value::Null}
-        },|v|serde_json::json!(v));
-        m.insert((*key).into(),decoded);
+    let mut m = serde_json::Map::new();
+    for (key, raw) in fields {
+        if *key == "UTC" {
+            continue;
+        }
+        let value = crate::gnss_log::number(key, raw);
+        let decoded = value.map_or_else(
+            || {
+                if !crate::gnss_log::known(key) && raw.parse::<f64>().is_err() {
+                    serde_json::json!(raw)
+                } else {
+                    serde_json::Value::Null
+                }
+            },
+            |v| serde_json::json!(v),
+        );
+        m.insert((*key).into(), decoded);
     }
-    let q=fields.get("Q").and_then(|s|s.parse::<u8>().ok()).filter(|q|*q<=8).ok_or("未知解状态定义")?;
-    let week=fields.get("Week").and_then(|s|s.parse::<u32>().ok()).filter(|w|*w>0).ok_or("GPS 周数无效")?;
-    let tow=fields.get("TOW").and_then(|s|s.parse::<f64>().ok()).filter(|t|t.is_finite()&&(0.0..604800.0).contains(t)).ok_or("GPS 周内秒无效")?;
-    let dt=chrono::NaiveDateTime::parse_from_str(fields.get("UTC").ok_or("缺少 UTC")?,"%Y%m%d%H%M%S%.f").map_err(|_|"日志 UTC 格式无效")?;
-    m.insert("Week".into(),serde_json::json!(week));m.insert("TOW".into(),serde_json::json!(tow));
-    m.insert("time".into(),serde_json::json!(dt.and_utc().to_rfc3339_opts(chrono::SecondsFormat::Millis,true)));
-    m.insert("solution".into(),serde_json::json!(quality_name(q)));
+    let q = fields.get("Q").and_then(|s| s.parse::<u8>().ok()).filter(|q| *q <= 8).ok_or("未知解状态定义")?;
+    let week =
+        fields.get("Week").and_then(|s| s.parse::<u32>().ok()).filter(|w| *w > 0).ok_or("GPS 周数无效")?;
+    let tow = fields
+        .get("TOW")
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|t| t.is_finite() && (0.0..604800.0).contains(t))
+        .ok_or("GPS 周内秒无效")?;
+    let dt = chrono::NaiveDateTime::parse_from_str(fields.get("UTC").ok_or("缺少 UTC")?, "%Y%m%d%H%M%S%.f")
+        .map_err(|_| "日志 UTC 格式无效")?;
+    m.insert("Week".into(), serde_json::json!(week));
+    m.insert("TOW".into(), serde_json::json!(tow));
+    m.insert(
+        "time".into(),
+        serde_json::json!(dt.and_utc().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
+    );
+    m.insert("solution".into(), serde_json::json!(quality_name(q)));
     Ok(serde_json::Value::Object(m))
 }
 
-pub fn find_solution_logs(root:&Path)->Vec<PathBuf>{
-    let mut logs=Vec::new();
-    let Ok(entries)=fs::read_dir(root) else{return logs;};
-    for entry in entries.flatten(){let p=entry.path();
-        if entry.file_type().is_ok_and(|t|t.is_symlink()){continue;}
-        if p.is_dir(){logs.extend(find_solution_logs(&p));}
-        else if p.extension().is_some_and(|e|e.eq_ignore_ascii_case("log"))&&p.file_name().is_some_and(|e|!e.eq_ignore_ascii_case("console.log")){
-            if let Ok(file)=fs::File::open(&p){if BufReader::new(file).lines().take(256).map_while(Result::ok).any(|l|l.split_whitespace().any(|s|s=="Log=4")){logs.push(p);}}
+pub fn find_solution_logs(root: &Path) -> Vec<PathBuf> {
+    let mut logs = Vec::new();
+    let Ok(entries) = fs::read_dir(root) else {
+        return logs;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if entry.file_type().is_ok_and(|t| t.is_symlink()) {
+            continue;
+        }
+        if p.is_dir() {
+            logs.extend(find_solution_logs(&p));
+        } else if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("log"))
+            && p.file_name().is_some_and(|e| !e.eq_ignore_ascii_case("console.log"))
+        {
+            if let Ok(file) = fs::File::open(&p) {
+                if BufReader::new(file)
+                    .lines()
+                    .take(256)
+                    .map_while(Result::ok)
+                    .any(|l| l.split_whitespace().any(|s| s == "Log=4"))
+                {
+                    logs.push(p);
+                }
+            }
         }
     }
-    logs.sort();logs
+    logs.sort();
+    logs
 }
-pub fn find_solution_log(root:&Path)->Option<PathBuf>{let mut paths=find_solution_logs(root);if paths.len()==1{paths.pop()}else{None}}
+pub fn find_solution_log(root: &Path) -> Option<PathBuf> {
+    let mut paths = find_solution_logs(root);
+    if paths.len() == 1 {
+        paths.pop()
+    } else {
+        None
+    }
+}
 
 pub fn quality_name(q: u8) -> &'static str {
     match q {
@@ -167,8 +233,8 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
     let mut origin = reference;
     let mut last_time = None;
     let mut diagnostics = Vec::new();
-    let mut diagnostic_keys=std::collections::HashSet::new();
-    let mut duplicate_rows=0;
+    let mut diagnostic_keys = std::collections::HashSet::new();
+    let mut duplicate_rows = 0;
     let mut reader = BufReader::new(file);
     let mut buffer = String::new();
     loop {
@@ -182,21 +248,23 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
             header.line(line)?;
             continue;
         }
-        if line.trim().is_empty() {continue;}
+        if line.trim().is_empty() {
+            continue;
+        }
         let fields = match header.fields(line) {
-            Ok(fields)=>fields,
-            Err(_) if !complete=>break,
-            Err(error)=>return Err(error),
+            Ok(fields) => fields,
+            Err(_) if !complete => break,
+            Err(error) => return Err(error),
         };
-        let number = |key: &str| {
-            fields
-                .get(key)
-                .and_then(|v| crate::gnss_log::number(key,v))
-        };
+        let number = |key: &str| fields.get(key).and_then(|v| crate::gnss_log::number(key, v));
         total += 1;
-        let metric=diagnostic(&fields)?;
-        let key=number("Week").zip(number("TOW")).map(|(w,t)|((w*604800.+t)*1000.).round() as i64);
-        if key.is_none_or(|k|diagnostic_keys.insert(k)){diagnostics.push(metric);}else{duplicate_rows+=1;}
+        let metric = diagnostic(&fields)?;
+        let key = number("Week").zip(number("TOW")).map(|(w, t)| ((w * 604800. + t) * 1000.).round() as i64);
+        if key.is_none_or(|k| diagnostic_keys.insert(k)) {
+            diagnostics.push(metric);
+        } else {
+            duplicate_rows += 1;
+        }
         let q = number("Q").ok_or("缺少有效的 Q 列")?;
         if q.fract() != 0.0 || !(0.0..=8.0).contains(&q) {
             return Err("未知解状态定义".into());
@@ -230,24 +298,19 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
         }
         last_time = Some(gps);
         let utc = fields.get("UTC").ok_or("缺少 UTC")?;
-        let dt = chrono::NaiveDateTime::parse_from_str(utc, "%Y%m%d%H%M%S%.f")
-            .map_err(|_| "日志 UTC 格式无效")?;
+        let dt =
+            chrono::NaiveDateTime::parse_from_str(utc, "%Y%m%d%H%M%S%.f").map_err(|_| "日志 UTC 格式无效")?;
         let origin = *origin.get_or_insert(xyz);
         let [e, n, u] = enu(xyz, origin);
         epochs.push(RealEpoch {
-            time: dt
-                .and_utc()
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            time: dt.and_utc().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             e,
             n,
             u,
             x: xyz[0],
             y: xyz[1],
             z: xyz[2],
-            satellites: number("FloUse")
-                .or_else(|| number("SppS"))
-                .unwrap_or(0.0)
-                .max(0.0) as i32,
+            satellites: number("FloUse").or_else(|| number("SppS")).unwrap_or(0.0).max(0.0) as i32,
             solution: quality_name(q).into(),
             raw_quality: q,
             gps_week: week as u32,
@@ -265,12 +328,7 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
         source: "ipspos".into(),
         epochs,
         reference_xyz: Some(reference_xyz),
-        reference_kind: if reference.is_some() {
-            "configured"
-        } else {
-            "first-valid"
-        }
-        .into(),
+        reference_kind: if reference.is_some() { "configured" } else { "first-valid" }.into(),
         total_rows: total,
         rejected_rows: rejected,
         quality_counts: counts,
@@ -280,15 +338,15 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
         diagnostics,
         analysis_config: HashMap::new(),
         duplicate_rows,
-        is_live_cache:false,
-        product_history:Vec::new(),
-        run_id:String::new(),
-        solution_mode:header.mode,
-        log_version:4,
-        engine_build_id:String::new(),
-        ntrip_log_path:None,
-        product_log_path:None,
-        client_status:serde_json::Value::Null,
+        is_live_cache: false,
+        product_history: Vec::new(),
+        run_id: String::new(),
+        solution_mode: header.mode,
+        log_version: 4,
+        engine_build_id: String::new(),
+        ntrip_log_path: None,
+        product_log_path: None,
+        client_status: serde_json::Value::Null,
     })
 }
 
@@ -296,25 +354,35 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
 mod tests {
     use super::*;
     #[test]
-    fn product_snapshots_distinguish_zero_and_unknown_without_inventing_receive_time(){
-        let v=serde_json::json!({"arrivalUnix":1792195200,"products":[{"component":"orbit","fresh":0,"age":12.}]});
-        let m=product_metric(&v).unwrap();assert_eq!(m["orbit"],0);assert_eq!(m["orbitAge"],12.);assert!(m["clock"].is_null());assert!(product_metric(&serde_json::json!({"week":2440,"tow":100})).is_none());
+    fn product_snapshots_distinguish_zero_and_unknown_without_inventing_receive_time() {
+        let v = serde_json::json!({"arrivalUnix":1792195200,"products":[{"component":"orbit","fresh":0,"age":12.}]});
+        let m = product_metric(&v).unwrap();
+        assert_eq!(m["orbit"], 0);
+        assert_eq!(m["orbitAge"], 12.);
+        assert!(m["clock"].is_null());
+        assert!(product_metric(&serde_json::json!({"week":2440,"tow":100})).is_none());
     }
     #[test]
-    fn product_counts_and_age_do_not_turn_unknown_into_zero_or_hide_valid_age(){
+    fn product_counts_and_age_do_not_turn_unknown_into_zero_or_hide_valid_age() {
         let m=product_metric(&serde_json::json!({"arrivalUnix":1792195200,"products":[{"component":"orbit","fresh":null,"age":-1},{"component":"orbit","fresh":8,"age":5.},{"component":"clock","fresh":null,"age":-1}]})).unwrap();
-        assert_eq!(m["orbit"],8);assert_eq!(m["orbitAge"],5.);assert!(m["clock"].is_null());assert!(m["clockAge"].is_null());
+        assert_eq!(m["orbit"], 8);
+        assert_eq!(m["orbitAge"], 5.);
+        assert!(m["clock"].is_null());
+        assert!(m["clockAge"].is_null());
     }
     #[test]
-    fn comparison_metadata_never_copies_connection_credentials(){
+    fn comparison_metadata_never_copies_connection_credentials() {
         let m=config_summary("GNSS_ARMode=2;\nGNSS_SP3File=D:/product.sp3;\nGNSS_UserPassword=private;\nROVE_NTRIP_UserID=private;\nROVE_NTRIP_Password=private;\nPRODUCT_NTRIP_Type=SSR;");
-        assert_eq!(m.len(),3);assert!(!serde_json::to_string(&m).unwrap().contains("private"));
+        assert_eq!(m.len(), 3);
+        assert!(!serde_json::to_string(&m).unwrap().contains("private"));
     }
     #[test]
-    fn future_product_age_retains_its_native_sign(){
-        let m=product_metric(&serde_json::json!({"arrivalUnix":1792195200,"products":[
-            {"component":"orbit","fresh":8,"age":-2.},{"component":"orbit","fresh":4,"age":5.}]})).unwrap();
-        assert_eq!(m["orbit"],12);assert_eq!(m["orbitAge"],-2.);
+    fn future_product_age_retains_its_native_sign() {
+        let m = product_metric(&serde_json::json!({"arrivalUnix":1792195200,"products":[
+            {"component":"orbit","fresh":8,"age":-2.},{"component":"orbit","fresh":4,"age":5.}]}))
+        .unwrap();
+        assert_eq!(m["orbit"], 12);
+        assert_eq!(m["orbitAge"], -2.);
     }
     #[test]
     fn ecef_to_local_has_known_axes() {
@@ -339,17 +407,31 @@ mod tests {
         assert_eq!(result.epochs[0].time, "2026-10-01T00:00:00.000Z");
         assert_eq!(result.epochs[0].solution, "FLOFIX");
         assert_eq!(result.epochs[1].solution, "HOLD");
-        assert_eq!(
-            [result.epochs[1].e, result.epochs[1].n, result.epochs[1].u],
-            [2.0, 3.0, 1.0]
-        );
+        assert_eq!([result.epochs[1].e, result.epochs[1].n, result.epochs[1].u], [2.0, 3.0, 1.0]);
         fs::write(&path, format!("{header}{rows}bad complete row\n")).unwrap();
         assert!(read_solution(&path, None).is_err());
         fs::remove_file(path).unwrap();
     }
 }
 
-#[cfg(test)]mod filename_tests{
- use super::*;
- #[test]fn case_names_and_uppercase_extension_are_content_discovered(){let root=std::env::temp_dir().join(format!("named-results-{}",uuid::Uuid::new_v4()));fs::create_dir(&root).unwrap();let first=root.join("rover_STA_BetaV0.611.LOG");fs::write(&first,"# Program : IPSPOS BetaV0.611 Log=4\n").unwrap();fs::write(root.join("NTRIP.log"),"# StatusLog=1").unwrap();assert_eq!(find_solution_log(&root),Some(first.clone()));let second=root.join("rover_KIN_BetaV0.611.log");fs::write(&second,"# Program : IPSPOS Log=4\n").unwrap();assert_eq!(find_solution_logs(&root).len(),2);assert!(find_solution_log(&root).is_none());for p in [first,second,root.join("NTRIP.log")]{fs::remove_file(p).unwrap();}fs::remove_dir(root).unwrap();}
+#[cfg(test)]
+mod filename_tests {
+    use super::*;
+    #[test]
+    fn case_names_and_uppercase_extension_are_content_discovered() {
+        let root = std::env::temp_dir().join(format!("named-results-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let first = root.join("rover_STA_BetaV0.611.LOG");
+        fs::write(&first, "# Program : IPSPOS BetaV0.611 Log=4\n").unwrap();
+        fs::write(root.join("NTRIP.log"), "# StatusLog=1").unwrap();
+        assert_eq!(find_solution_log(&root), Some(first.clone()));
+        let second = root.join("rover_KIN_BetaV0.611.log");
+        fs::write(&second, "# Program : IPSPOS Log=4\n").unwrap();
+        assert_eq!(find_solution_logs(&root).len(), 2);
+        assert!(find_solution_log(&root).is_none());
+        for p in [first, second, root.join("NTRIP.log")] {
+            fs::remove_file(p).unwrap();
+        }
+        fs::remove_dir(root).unwrap();
+    }
 }

@@ -1,0 +1,11 @@
+dist
+deliverables
+runtime
+resources
+src-tauri
+node_modules
+pnpm-lock.yaml
+videos
+design
+docs
+*.md

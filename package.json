@@ -14,7 +14,11 @@
     "desktop:dev": "node scripts/tauri.mjs dev",
     "desktop:build": "node scripts/tauri.mjs build --no-bundle",
     "desktop:package": "pnpm desktop:build && node scripts/package.mjs",
-    "test:ui": "node tests/ui-smoke.mjs"
+    "test:ui": "node tests/ui-smoke.mjs",
+    "format": "node node_modules/prettier/bin/prettier.cjs --write \"src/**/*.{ts,tsx,css}\" \"contracts/**/*.{ts,json}\" \"mock/**/*.ts\" \"tests/**/*.{ts,mjs}\" \"*.{ts,js,json}\"",
+    "format:check": "node node_modules/prettier/bin/prettier.cjs --check \"src/**/*.{ts,tsx,css}\" \"contracts/**/*.{ts,json}\" \"mock/**/*.ts\" \"tests/**/*.{ts,mjs}\" \"*.{ts,js,json}\"",
+    "lint": "node node_modules/eslint/bin/eslint.js src contracts tests",
+    "verify": "pnpm check && pnpm lint && pnpm format:check && pnpm test"
   },
   "dependencies": {
     "@ant-design/icons": "^6.0.0",
@@ -27,13 +31,18 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2.0.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.64.1",
+    "prettier": "^3.9.10",
     "typescript": "^5.9.0",
+    "typescript-eslint": "^8.72.1",
     "vite": "^7.0.0",
     "vitest": "^3.2.0"
   }

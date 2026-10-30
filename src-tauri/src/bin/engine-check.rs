@@ -1,17 +1,17 @@
-#[path = "../live_log.rs"]
-mod live_log;
 #[path = "../gnss_log.rs"]
 mod gnss_log;
-#[path = "../status_log.rs"]
-mod status_log;
+#[path = "../library.rs"]
+mod library;
+#[path = "../live_log.rs"]
+mod live_log;
 #[path = "../native.rs"]
 mod native;
 #[path = "../options.rs"]
 mod options;
 #[path = "../results.rs"]
 mod results;
-#[path = "../library.rs"]
-mod library;
+#[path = "../status_log.rs"]
+mod status_log;
 use std::{path::PathBuf, thread, time::Duration};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -34,11 +34,7 @@ fn main() {
     let ids = runtime.submit(requests, args[3].parse().unwrap()).unwrap();
     loop {
         let snapshot = runtime.snapshot();
-        if snapshot
-            .tasks
-            .iter()
-            .all(|t| !matches!(t.status.as_str(), "queued" | "running"))
-        {
+        if snapshot.tasks.iter().all(|t| !matches!(t.status.as_str(), "queued" | "running")) {
             let tasks:Vec<_>=snapshot.tasks.iter().map(|t|serde_json::json!({"id":t.id,"name":t.name,"status":t.status,"outputDir":t.output_dir,"exitCode":t.exit_code,"error":t.error,"elapsedSec":t.elapsed_sec})).collect();
             println!("{}", serde_json::to_string_pretty(&tasks).unwrap());
             for id in ids {
