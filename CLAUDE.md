@@ -28,6 +28,7 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 | `src/App.tsx` | Shell only: navigation, layout, page switch. No data logic. |
 | `src/services/native-engine.ts` | The single bridge to Rust. 1 Hz poll; `useEngine(selector)` for components. |
 | `src/services/live-buffers.ts` | Client mirror of realtime buffers (incremental `realtime_deltas`). |
+| `src/services/result-wire.ts` | Decodes binary analysis results (`import_analysis`, `open_analysis`, `native_result`) into rows. |
 | `src/pages/` | One file per page; `pages/realtime/` holds monitor sub-views and formatting. |
 | `src/components/Charts.tsx` | `Chart` (ECharts wrapper) and the ENU positioning chart. |
 | `src/components/DiagnosticChart.tsx` | All Log=4 diagnostic time series (AR, atmosphere, residuals, …). |
@@ -36,6 +37,7 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 | `src/analysis.ts`, `src/diagnostics.ts` | Pure analysis/statistics; cached per input array. |
 | `src-tauri/src/realtime.rs`, `live_hub.rs` | Realtime sessions, log tailing, buffers, `realtime_deltas`. |
 | `src-tauri/src/native.rs`, `results.rs` | Post-processing queue and Log=4 result parsing. |
+| `src-tauri/src/table.rs`, `wire.rs` | Column storage of diagnostics; binary encoding of results for the page. |
 | `src-tauri/src/gnss_log.rs` | The Log=4 contract (header, columns, missing markers). |
 | `tests/*.test.ts` | Vitest unit tests. `tests/*.mjs` are desktop/browser scripts driven over CDP. |
 
@@ -52,6 +54,10 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 - **Identity means "unchanged".** Engine snapshot slices, buffers, analysis inputs and thinned series keep their
   array/object identity until their content changes; memos, `useEngine` and caches (WeakMap keyed by arrays) rely
   on it. `useEngine` selectors must return a snapshot property, never a newly derived array.
+- **Analysis results travel as binary columns**, never as JSON: a 47 h result is ~180 MiB of JSON. The format is
+  documented in `wire.rs` and must stay lossless (bit-exact numbers, identical row keys and order). A format change
+  updates `wire.rs` and `result-wire.ts` together and regenerates `tests/fixtures/result-wire.*` with
+  `UPDATE_WIRE_FIXTURE=1 cargo test --bin findyou wire`. Decoding is time-sliced so the page never freezes.
 - **Do not call `chart.getOption()` on hot paths**; it deep-copies all series data. Use `readZooms()` in Charts.tsx.
 - **Session ownership:** a detail response is shown only if its session key and run id match the current selection
   (see `liveSelectionVersion` in native-engine.ts).
@@ -67,7 +73,8 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 `$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9297'`):
 realtime detail (1 × 3600), realtime comparison (6 × 3600, fixture over IPC) and a large post-processing analysis
 (`--logs "a.log|b.log"`). `--profile 1` adds the top self-time functions; build with `FINDU_PROFILE_BUILD=1` to keep
-function names. Results go to `runtime/perf/<label>.json`. Compare against the numbers in the latest
+function names. Results go to `runtime/perf/<label>.json`. Rust-side load cost (parse, encode, payload size) without
+WebView: `cargo run --release --bin load-check -- <a.log> <b.log>`. Compare against the numbers in the latest
 `docs/VALIDATION-*.md` after any change to the engine bridge, charts or analysis.
 
 Large real inputs: `D:\05_Code\02_posrtk\IPSPOS\Data\TEST\POST\res` (Log=4 results, e.g. the 47 h, 1 Hz ALLOY
