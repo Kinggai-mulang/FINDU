@@ -35,6 +35,7 @@ import { PathInput } from '../components/PathInput';
 import { defaultConfig } from '../domain';
 import { timeRows, geometryDiagnostics, diagnosticsCsv } from '../diagnostics';
 import { AtmosphereDiagnostics } from '../components/AtmosphereDiagnostics';
+import { chartInteractionHint } from '../components/chart-theme';
 import {
   ObservationDiagnostics,
   AmbiguityDiagnostics,
@@ -1263,6 +1264,7 @@ export default function RealtimeMonitor({
                       { value: 'metrics', label: '残差与指标' },
                     ]}
                   />
+                  <span>{chartInteractionHint}</span>
                 </div>
                 {observationSection === 'support' ? (
                   <ObservationDiagnostics {...diagProps} />

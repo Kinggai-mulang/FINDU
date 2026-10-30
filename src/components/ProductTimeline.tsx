@@ -2,6 +2,9 @@ import { utcAxisLabel } from '../time';
 import type { ResultSet } from '../../contracts';
 import { Chart } from './Charts';
 import { NoData } from './common';
+import { distinctNames } from './chart-data';
+import { chartText, legendStyle, timeAxisStyle, timeSlider, tooltipStyle } from './chart-theme';
+import { palette } from '../theme';
 export function ProductTimeline({ results }: { results: ResultSet[] }) {
   const components = [
     ['orbit', '轨道'],
@@ -9,11 +12,13 @@ export function ProductTimeline({ results }: { results: ResultSet[] }) {
     ['code', '码偏差'],
     ['phase', '相位偏差'],
   ];
+  // One result: the component alone; several: component plus the part of the name that differs.
+  const short = results.length > 1 ? distinctNames(results.map((r) => r.name)) : results.map(() => '');
   const rows = results
-    .flatMap((r) =>
+    .flatMap((r, ri) =>
       components.map(([key, label]) => ({
         id: `${r.id}:${key}`,
-        name: `${label} · ${r.name}`,
+        name: short[ri] ? `${label} · ${short[ri]}` : label,
         key,
         history: r.productHistory ?? [],
       })),
@@ -31,22 +36,19 @@ export function ProductTimeline({ results }: { results: ResultSet[] }) {
       label="产品时效快照时间线，接收时间 UTC"
       option={{
         animation: false,
-        textStyle: { color: '#a1b5d0', fontSize: 12 },
-        legend: { top: 8, textStyle: { color: '#bbcbe1' } },
-        tooltip: { trigger: 'axis' },
+        textStyle: chartText,
+        legend: legendStyle(190),
+        tooltip: { ...tooltipStyle, trigger: 'axis' },
         grid: { left: 190, right: 28, top: 48, bottom: 48 },
-        xAxis: { type: 'time', axisLabel: { color: '#9cabbe', formatter: utcAxisLabel } },
+        xAxis: { ...timeAxisStyle, type: 'time', axisLabel: { ...chartText, formatter: utcAxisLabel } },
         yAxis: {
           type: 'category',
           inverse: true,
           data: rows.map((r) => r.name),
-          axisLabel: { color: '#9cabbe', width: 170, overflow: 'truncate' },
-          splitLine: { show: true, lineStyle: { color: '#26354a' } },
+          axisLabel: { ...chartText, width: 170, overflow: 'truncate' },
+          splitLine: { show: true, lineStyle: { color: palette.gridLine } },
         },
-        dataZoom: [
-          { id: 'time-inside', type: 'inside', xAxisIndex: 0 },
-          { id: 'time-slider', type: 'slider', xAxisIndex: 0, bottom: 5, height: 16 },
-        ],
+        dataZoom: [{ id: 'time-inside', type: 'inside', xAxisIndex: 0 }, timeSlider(0, 5)],
         series: rows.flatMap((r, i) =>
           states.map((s) => ({
             id: `${r.id}:${s.name}`,

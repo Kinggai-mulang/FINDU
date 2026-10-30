@@ -5,6 +5,7 @@ import { NoData } from '../../components/common';
 import { fileColors } from '../../components/chart-data';
 import { utcAxisLabel } from '../../time';
 import { val } from './format';
+import { chartText, legendStyle, timeAxisStyle, tooltipStyle, valueAxisStyle } from '../../components/chart-theme';
 
 /** Small time-series panel for product counts and ages in the realtime monitor. */
 export const MetricHistory = memo(
@@ -35,17 +36,12 @@ export const MetricHistory = memo(
           option={{
             animation: false,
             color: fileColors,
-            textStyle: { color: '#98abc6', fontSize: 12 },
-            legend: { top: 10, textStyle: { color: '#b6c5da' } },
-            tooltip: { trigger: 'axis' },
-            grid: { left: 58, right: 22, top: 44, bottom: 35 },
-            xAxis: { type: 'time', axisLabel: { formatter: utcAxisLabel } },
-            yAxis: {
-              type: 'value',
-              name: unit,
-              scale: true,
-              splitLine: { lineStyle: { color: '#2b374a', type: 'dashed' } },
-            },
+            textStyle: chartText,
+            legend: legendStyle(58),
+            tooltip: { ...tooltipStyle, trigger: 'axis' },
+            grid: { left: 58, right: 22, top: 50, bottom: 35 },
+            xAxis: { ...timeAxisStyle, type: 'time', axisLabel: { ...chartText, formatter: utcAxisLabel } },
+            yAxis: { ...valueAxisStyle(unit), type: 'value', scale: true },
             series: keys.map((k) => ({
               name:
                 (

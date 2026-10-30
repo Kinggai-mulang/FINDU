@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { decimateIndices, FULL_DETAIL_LIMIT } from '../src/components/decimate';
+import { distinctNames } from '../src/components/chart-data';
 
 const series = (n: number, f: (i: number) => number) => ({
   times: Array.from({ length: n }, (_, i) => i * 1000),
@@ -34,5 +35,22 @@ describe('decimateIndices', () => {
   it('tolerates missing values', () => {
     const { times, values } = series(20000, (i) => (i % 3 ? i : NaN));
     expect(decimateIndices(times, values, 100).length).toBeGreaterThan(0);
+  });
+});
+
+describe('distinctNames', () => {
+  it('keeps only what distinguishes compared results', () => {
+    expect(
+      distinctNames([
+        'BAUT00DEU_R_20240190000_01D_30S_MO_KIN_BetaV0.605 · ba6d9a',
+        'BAUT00DEU_R_20240190000_01D_30S_MO_STA_BetaV0.605 · c1fec5',
+      ]),
+    ).toEqual(['KIN', 'STA']);
+    expect(distinctNames(['01_Alloy-WHU', '02_Alloy-PLANET'])).toEqual(['01_Alloy-WHU', '02_Alloy-PLANET']);
+  });
+  it('keeps the hash when it is the only difference, and full names when nothing short is unique', () => {
+    expect(distinctNames(['run · aaaaaa', 'run · bbbbbb'])).toEqual(['aaaaaa', 'bbbbbb']);
+    expect(distinctNames(['same', 'same'])).toEqual(['same', 'same']);
+    expect(distinctNames(['only'])).toEqual(['only']);
   });
 });

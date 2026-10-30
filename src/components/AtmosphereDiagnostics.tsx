@@ -10,6 +10,7 @@ import {
 } from '../diagnostics';
 import { format } from '../analysis';
 import { DiagnosticPanel, type DiagnosticProps } from './SolverDiagnostics';
+import { chartInteractionHint } from './chart-theme';
 import { Panel, NoData } from './common';
 
 export function AtmosphereDiagnostics(props: DiagnosticProps) {
@@ -84,7 +85,7 @@ export function AtmosphereDiagnostics(props: DiagnosticProps) {
             { value: 'statistics', label: '分布与统计' },
           ]}
         />
-        <span>图表共享观测时间 · 原始单位保留</span>
+        <span>图表共享观测时间 · 原始单位保留 · {chartInteractionHint}</span>
       </div>
       {view === 'estimate' && (
         <>

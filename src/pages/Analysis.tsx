@@ -51,6 +51,7 @@ import {
 } from '../components/SolverDiagnostics';
 import { fileColors } from '../components/chart-data';
 import '../analysis.css';
+import { chartInteractionHint } from '../components/chart-theme';
 import { utcRangeSummary } from '../time';
 
 type Settings = {
@@ -902,6 +903,8 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
           {modes.length > 1
             ? '定位支持跨模式对比；专属诊断按算法分组，UD 与 DD 残差分别解读。'
             : '依据 Log=4 文件头识别模式 · 专属诊断沿用当前时间窗与样本集合'}
+          <br />
+          <small>{chartInteractionHint}</small>
         </span>
         {long && (
           <Tooltip title="长序列按像素列保留首、末、最高、最低点，尖峰与解状态变化不会丢失；放大到 6000 点以内自动显示全部历元。统计、事件与导出始终使用全部历元。">

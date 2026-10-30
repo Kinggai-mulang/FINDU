@@ -46,3 +46,32 @@ export function equalExtent(epochs: Epoch[], width: number, height: number) {
     maxY: cy + (unit * height) / 2,
   };
 }
+
+const hashSuffix = /\s·\s[0-9a-f]{6,}$/;
+/**
+ * Short legend labels for compared results: the common prefix and suffix are dropped
+ * (`…_30S_MO_KIN_BetaV0.605 · ba6d9a` / `…_STA_…` → `KIN` / `STA`). Falls back to the full names
+ * whenever the short ones would be empty or ambiguous.
+ */
+export function distinctNames(names: string[]): string[] {
+  if (names.length < 2) return names;
+  const shorten = (input: string[]) => {
+    const tokens = input.map((n) => n.split(/([_\-\s·.]+)/));
+    const first = tokens[0];
+    let p = 0;
+    while (tokens.every((t) => p < t.length - 1 && t[p] === first[p])) p++;
+    let s = 0;
+    while (tokens.every((t) => s < t.length - p - 1 && t[t.length - 1 - s] === first[first.length - 1 - s])) s++;
+    return tokens.map((t) =>
+      t
+        .slice(p, t.length - s)
+        .join('')
+        .replace(/^[_\-\s·.]+|[_\-\s·.]+$/g, ''),
+    );
+  };
+  const unique = (out: string[]) => out.every(Boolean) && new Set(out).size === out.length;
+  const withoutHash = shorten(names.map((n) => n.replace(hashSuffix, '')));
+  if (unique(withoutHash)) return withoutHash;
+  const withHash = shorten(names);
+  return unique(withHash) ? withHash : names;
+}

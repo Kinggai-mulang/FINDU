@@ -12,7 +12,24 @@ import {
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Epoch, ResultSet } from '../../contracts';
-import { coloredData, equalExtent, fileColors, directionColors, solutionGroups, solutionColor } from './chart-data';
+import {
+  coloredData,
+  distinctNames,
+  equalExtent,
+  fileColors,
+  directionColors,
+  solutionGroups,
+  solutionColor,
+} from './chart-data';
+import {
+  chartText,
+  legendStyle,
+  timeAxisStyle,
+  timeSlider,
+  tooltipStyle,
+  valueAxisStyle,
+  valueSlider,
+} from './chart-theme';
 import { epochXyz, projectEpochs, positionTooltip, type Xyz } from './positioning-data';
 import { utcAxisLabel } from '../time';
 import { SYMBOL_LIMIT, thinEpochs } from './decimate';
@@ -220,22 +237,13 @@ function base(): EChartsCoreOption {
     animation: false,
     backgroundColor: 'transparent',
     color: fileColors,
-    textStyle: { color: '#93a4bb', fontFamily: 'Segoe UI, Microsoft YaHei, sans-serif', fontSize: 12 },
+    textStyle: chartText,
     tooltip: {
+      ...tooltipStyle,
       trigger: 'axis',
-      backgroundColor: '#202c3d',
-      borderColor: '#3d506b',
-      textStyle: { color: '#e5ecf5', fontSize: 13 },
       valueFormatter: (v: unknown) => (typeof v === 'number' ? v.toFixed(4) : String(v)),
     },
-    legend: {
-      top: 8,
-      right: 32,
-      textStyle: { color: '#b0bfd3', fontSize: 12 },
-      icon: 'roundRect',
-      itemWidth: 15,
-      itemHeight: 4,
-    },
+    legend: legendStyle(68),
     grid: { left: 68, right: 44, top: 48, bottom: 54 },
     xAxis: timeAxis(0),
     yAxis: valueAxis('m', 0),
@@ -248,36 +256,23 @@ function base(): EChartsCoreOption {
         zoomOnMouseWheel: true,
         moveOnMouseMove: true,
       },
-      {
-        id: 'time-slider',
-        type: 'slider',
-        xAxisIndex: 0,
-        height: 18,
-        bottom: 6,
-        borderColor: '#30405a',
-        fillerColor: '#669fff24',
-        textStyle: { color: '#91a4bf' },
-      },
+      timeSlider(0),
     ],
   };
 }
 const timeAxis = (gridIndex: number) => ({
+  ...timeAxisStyle,
   type: 'time',
   gridIndex,
-  axisLine: { lineStyle: { color: '#354157' } },
-  axisLabel: { hideOverlap: true, formatter: utcAxisLabel },
-  splitLine: { show: false },
+  axisLabel: { ...chartText, hideOverlap: true, formatter: utcAxisLabel },
 });
 const valueAxis = (name: string, gridIndex: number) => ({
+  ...valueAxisStyle(name),
   type: 'value',
   gridIndex,
-  name,
   scale: true,
-  nameTextStyle: { color: '#9cabbe' },
-  splitLine: { lineStyle: { color: '#2a3547', type: 'dashed' } },
   axisLabel: {
-    color: '#91a2b9',
-    hideOverlap: true,
+    ...valueAxisStyle(name).axisLabel,
     formatter: (value: number) => Number(value.toPrecision(5)).toString(),
   },
 });
@@ -341,6 +336,8 @@ function PositioningChartView({
   const option = useMemo(() => {
     const option = base();
     const series: unknown[] = [];
+    // Legend and tooltip show only the part of the names that tells compared results apart.
+    const short = distinctNames(datasets.map((d) => d.name));
     const add = (source: Dataset, di: number, key: 'e' | 'n' | 'u', ai: number) => {
       if (view === 'overlay' && direction !== 'all' && direction !== key) return;
       const data = {
@@ -353,7 +350,7 @@ function PositioningChartView({
       const metadata = (value: unknown[]) => [
         ...value,
         view === 'trajectory' ? 'EN' : key.toUpperCase(),
-        data.name,
+        short[di],
         data.id,
       ];
       const overlay = view === 'overlay';
@@ -379,7 +376,7 @@ function PositioningChartView({
         series.push({
           ...shape,
           id: `${data.id}:${key}`,
-          name: data.name,
+          name: short[di],
           itemStyle: { color: fileColors[di % fileColors.length] },
           data: data.epochs.map((e) => metadata([...values(e), e.solution, e.time])),
         });
@@ -419,10 +416,8 @@ function PositioningChartView({
       option.xAxis = { ...valueAxis('E / m', 0), min: extent.minX, max: extent.maxX };
       option.yAxis = { ...valueAxis('N / m', 0), min: extent.minY, max: extent.maxY };
       option.tooltip = {
+        ...tooltipStyle,
         trigger: 'item',
-        backgroundColor: '#202c3d',
-        borderColor: '#3d506b',
-        textStyle: { color: '#e5ecf5' },
         formatter: (p: unknown) => positionTooltip(p, true),
       };
       // Both controllers share the grid: a wheel applies the same factor, while drag uses each axis.
@@ -431,11 +426,11 @@ function PositioningChartView({
         { id: 'en-y', type: 'inside', yAxisIndex: 0, filterMode: 'none' },
       ];
       datasets.forEach((d, i) => add(d, i, 'e', 0));
-      datasets.forEach((d) => {
+      datasets.forEach((d, di) => {
         const points = d.epochs.filter((e) => Number.isFinite(e.e) && Number.isFinite(e.n));
         if (!points.length) return;
         const name = compare
-          ? d.name
+          ? short[di]
           : solutionGroups.find((g) => (g.states as readonly string[]).includes(points[points.length - 1].solution))
               ?.name;
         series.push({
@@ -454,7 +449,7 @@ function PositioningChartView({
               {
                 name: '起点',
                 coord: [points[0].e, points[0].n],
-                value: [points[0].e, points[0].n, points[0].solution, points[0].time, 'EN', d.name, d.id],
+                value: [points[0].e, points[0].n, points[0].solution, points[0].time, 'EN', short[di], d.id],
                 itemStyle: { color: '#05603a', borderColor: '#34ff83', borderWidth: 1.5 },
               },
               {
@@ -467,7 +462,7 @@ function PositioningChartView({
                   points[points.length - 1].solution,
                   points[points.length - 1].time,
                   'EN',
-                  d.name,
+                  short[di],
                   d.id,
                 ],
                 itemStyle: { color: '#960c26', borderColor: '#ff5265', borderWidth: 1.5 },
@@ -519,13 +514,7 @@ function PositioningChartView({
           zoomOnMouseWheel: 'shift',
           moveOnMouseMove: 'shift',
         },
-        {
-          id: 'time-slider',
-          type: 'slider',
-          xAxisIndex: Array.from({ length: count }, (_, i) => i),
-          height: 18,
-          bottom: 6,
-        },
+        timeSlider(Array.from({ length: count }, (_, i) => i)),
         ...Array.from({ length: count }, (_, i) => ({
           id: `coordinate-${i}`,
           type: 'inside',
@@ -534,17 +523,9 @@ function PositioningChartView({
           zoomOnMouseWheel: true,
           moveOnMouseMove: true,
         })),
-        ...Array.from({ length: count }, (_, i) => ({
-          id: `coordinate-slider-${i}`,
-          type: 'slider',
-          yAxisIndex: i,
-          orient: 'vertical',
-          right: 8,
-          top: 48 + i * (pane + 32),
-          height: pane,
-          width: 12,
-          showDetail: false,
-        })),
+        ...Array.from({ length: count }, (_, i) =>
+          valueSlider(`coordinate-slider-${i}`, i, { top: 48 + i * (pane + 32), height: pane }),
+        ),
       ];
       datasets.forEach((d, i) => axes.forEach((k, a) => add(d, i, k, a)));
     }

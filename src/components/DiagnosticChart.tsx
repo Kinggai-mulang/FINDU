@@ -1,7 +1,16 @@
 import { memo, useMemo } from 'react';
 import { Chart } from './Charts';
 import { NoData } from './common';
-import { fileColors } from './chart-data';
+import { distinctNames, fileColors } from './chart-data';
+import {
+  chartText,
+  legendStyle,
+  timeAxisStyle,
+  timeSlider,
+  tooltipStyle,
+  valueAxisStyle,
+  valueSlider,
+} from './chart-theme';
 import { chartSamples } from '../diagnostics';
 import { DISPLAY_COLUMNS, decimateIndices } from './decimate';
 import { useDetail } from './detail-context';
@@ -58,6 +67,8 @@ export const DiagnosticChart = memo(
         d.diagnostics?.some((m) => fields.some((k) => diagnosticValue(m[k], valueScale, logarithmic) !== null)),
       );
       let outside = 0;
+      // Compared results differ only in a short part of their file names; the legend shows just that part.
+      const short = distinctNames(datasets.map((d) => d.name));
       const series = datasets.flatMap((d, i) =>
         fields.flatMap((k, j) => {
           const all = chartSamples(d.diagnostics ?? [], k, valueScale, logarithmic, bounds);
@@ -80,7 +91,7 @@ export const DiagnosticChart = memo(
               : fields.length === 1
                 ? (d.color ?? fileColors[0])
                 : fileColors[j % fileColors.length];
-          const name = datasets.length > 1 ? `${d.name} · ${labels[k] ?? k}` : (labels[k] ?? k);
+          const name = datasets.length > 1 ? `${short[i]} · ${labels[k] ?? k}` : (labels[k] ?? k);
           const line = {
             id: `${d.id}:${k}`,
             name,
@@ -134,13 +145,11 @@ export const DiagnosticChart = memo(
           option={{
             animation: false,
             color: fileColors,
-            textStyle: { color: '#9eafc8', fontSize: 13 },
-            legend: { top: 8, type: 'scroll', textStyle: { color: '#b9c8dc', fontSize: 13 } },
+            textStyle: chartText,
+            legend: legendStyle(states ? 84 : 64),
             tooltip: {
+              ...tooltipStyle,
               trigger: 'axis',
-              backgroundColor: '#202c3d',
-              borderColor: '#3d506b',
-              textStyle: { color: '#e5ecf5', fontSize: 13 },
               formatter: (params: unknown) => {
                 const rows = (Array.isArray(params) ? params : [params]) as {
                   value: (number | null)[];
@@ -167,30 +176,27 @@ export const DiagnosticChart = memo(
                 );
               },
             },
-            grid: { left: states ? 84 : 70, right: 38, top: 48, bottom: 50 },
+            grid: { left: states ? 84 : 64, right: 30, top: 58, bottom: 50 },
             xAxis: {
+              ...timeAxisStyle,
               type: 'time',
               min: timeDomain?.start,
               max: timeDomain?.end,
               axisPointer: { show: true, label: { show: false } },
-              axisLabel: { color: '#9cabbe', fontSize: 13, hideOverlap: true, formatter: utcAxisLabel },
+              axisLabel: { ...chartText, hideOverlap: true, formatter: utcAxisLabel },
             },
             yAxis: {
+              ...valueAxisStyle(unit),
               type: logarithmic ? 'log' : 'value',
               logBase: 10,
               min: bounds?.[0],
               max: bounds?.[1],
-              name: unit,
               scale: true,
               interval: states ? 1 : undefined,
-              nameTextStyle: { color: '#9cabbe' },
               axisLabel: {
-                color: '#9cabbe',
-                fontSize: 13,
-                hideOverlap: true,
+                ...valueAxisStyle(unit).axisLabel,
                 formatter: (v: number) => (states ? (states[v] ?? '') : Number(v.toPrecision(9)).toString()),
               },
-              splitLine: { lineStyle: { color: '#293749', type: 'dashed' } },
             },
             dataZoom: [
               {
@@ -201,18 +207,7 @@ export const DiagnosticChart = memo(
                 zoomOnMouseWheel: 'shift',
                 moveOnMouseMove: 'shift',
               },
-              {
-                id: 'time-slider',
-                type: 'slider',
-                xAxisIndex: 0,
-                height: 16,
-                bottom: 5,
-                borderColor: '#304158',
-                backgroundColor: '#101926',
-                fillerColor: '#659fff26',
-                handleStyle: { color: '#6685ac', borderColor: '#91abc9' },
-                textStyle: { color: '#91a4bf' },
-              },
+              timeSlider(0, 5),
               {
                 id: 'coordinate-0',
                 type: 'inside',
@@ -221,31 +216,18 @@ export const DiagnosticChart = memo(
                 zoomOnMouseWheel: true,
                 moveOnMouseMove: true,
               },
-              {
-                id: 'coordinate-slider-0',
-                type: 'slider',
-                yAxisIndex: 0,
-                width: 10,
-                right: 3,
-                showDetail: false,
-                filterMode: 'none',
-                borderColor: '#304158',
-                backgroundColor: '#101926',
-                fillerColor: '#659fff26',
-                handleStyle: { color: '#6685ac', borderColor: '#91abc9' },
-              },
+              valueSlider('coordinate-slider-0', 0, { top: 58, bottom: 50 }),
             ],
             series,
           }}
         />
-        {(bounds || onTimeRange) && (
+        {bounds && (
           <div className="chart-note diagnostic-chart-note">
             {logarithmic
               ? 'ADOP 对数轴 0.0001–1 cycle；原值保留。'
               : bounds
                 ? `阅读窗 ${bounds[0]}–${bounds[1]} ${unit}；越界点 ${outside} 个，三角标记保留原值。`
                 : ''}
-            {onTimeRange ? ' 滚轮调整纵轴 · Shift 调整时间 · 图例筛选' : ''}
           </div>
         )}
       </>
