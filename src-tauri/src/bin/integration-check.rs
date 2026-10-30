@@ -14,7 +14,8 @@ use std::{fs, path::PathBuf, sync::Arc, thread, time::{Duration,Instant}};
 fn main(){if let Err(e)=run(){eprintln!("{e}");std::process::exit(1);}}
 fn run()->Result<(),String>{
     let args:Vec<_>=std::env::args().collect();
-    if args.len()!=4{return Err("integration-check ENGINE ROOT REQUEST_JSON".into());}
+    if !(args.len()==4||args.len()==5&&args[4]=="--satellites"){return Err("integration-check ENGINE ROOT REQUEST_JSON [--satellites]".into());}
+    let check_satellites=args.len()==5;let mut satellite_seen=false;let mut last_satellite_poll=0;
     let root=PathBuf::from(&args[2]);fs::create_dir_all(&root).map_err(|e|e.to_string())?;
     let library=Arc::new(library::Library::new(&root));
     let hub=live_hub::LiveHub::new(PathBuf::from(&args[1]),root.join("realtime")).with_library(library.clone());
@@ -28,6 +29,16 @@ fn run()->Result<(),String>{
         }
         if start.elapsed()>Duration::from_secs(16){hub.stop_all();}
         let overview=hub.overview();
+        if check_satellites&&start.elapsed().as_secs()>last_satellite_poll {
+            last_satellite_poll=start.elapsed().as_secs();
+            let state=hub.snapshot(Some(&keys[0]))?;
+            if state.state=="running" {
+                let value=hub.runtime(Some(&keys[0]))?.satellites(&state.id,true)?;
+                satellite_seen|=value["satellites"].as_array().is_some_and(|rows|!rows.is_empty());
+                let opt=fs::read_to_string(PathBuf::from(&state.output_dir).join("live.opt")).map_err(|e|e.to_string())?;
+                if opt.contains("IPSClient_Satellite"){return Err("Diagnostics leaked into OPT".into());}
+            }
+        }
         if stopped_one&&start.elapsed()<Duration::from_secs(16) {
             independent_stop|=overview.iter().any(|s|s.session_key==keys[0]&&s.state=="stopped")&&
                 overview.iter().filter(|s|s.session_key!=keys[0]).all(|s|s.state=="running");
@@ -39,6 +50,7 @@ fn run()->Result<(),String>{
         if start.elapsed()>Duration::from_secs(35){hub.stop_all();return Err("Live integration timed out".into());}
         thread::sleep(Duration::from_millis(250));
     }
+    if check_satellites&&!satellite_seen{return Err("No snapshot through production launcher".into());}
     let mut snapshots=Vec::new();
     for key in &keys{
         let snapshot=hub.snapshot(Some(key))?;
@@ -76,7 +88,7 @@ fn run()->Result<(),String>{
             "ntripLogPath":result.ntrip_log_path,"productLogPath":result.product_log_path,"clientStatus":result.client_status}));
     }
     if keys.len()>1&&!independent_stop{return Err("Independent stop was not observed".into());}
-    let evidence=serde_json::json!({"snapshots":snapshots,"restart":restart,"reopened":reopened,"independentStop":independent_stop});
+    let evidence=serde_json::json!({"snapshots":snapshots,"restart":restart,"reopened":reopened,"independentStop":independent_stop,"satelliteSnapshotSeen":satellite_seen});
     fs::write(root.join("check.json"),serde_json::to_vec_pretty(&evidence).unwrap()).map_err(|e|e.to_string())?;
     println!("{}",serde_json::json!({"sessions":keys.len(),"reopened":reopened,"evidence":root.join("check.json")}));
     Ok(())

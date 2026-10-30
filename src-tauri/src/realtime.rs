@@ -25,6 +25,9 @@ const KEYS: &[&str] = &[
     "GNSS_RoveSampleTime",
     "GNSS_ARMode",
     "GNSS_ATXFile",
+    "GNSS_DCBFile",
+    "GNSS_bUseDCB",
+    "GNSS_DCBMaxHoldDays",
     "GNSS_ShareEPHPath",
     "GNSS_bUsePPPAntenna",
     "GNSS_bSSRCodeOSB",
@@ -363,6 +366,9 @@ impl RealtimeRuntime {
         } else {
             parent
         };
+        let (dcb, warnings) = options::dcb_overrides(&values, repo);
+        for (k,v) in dcb {run_text.push_str(&format!("{k} = {v};\n"));}
+        for warning in warnings {run_text.push_str(&format!("# {warning}\n"));}
         let cache = run.join("eph_cache");
         fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
         if let Some(old) = values.get("GNSS_ShareEPHPath").filter(|s| !s.is_empty() && !record_only) {
@@ -453,6 +459,12 @@ impl RealtimeRuntime {
                 cmd.env_remove(k);
             }
         }
+        let manifest:Value=serde_json::from_slice(&fs::read(self.engine_dir.join("manifest.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        let snapshot=self.data.lock().unwrap();
+        if snapshot.solution_mode!="RECORD"&&manifest["capabilities"]["satellite_snapshot"]==2 {
+            cmd.env("IPSPOS_DIAG_SATELLITE_DIR",options::engine_path(&run)?).env("IPSPOS_DIAG_SATELLITE_RUN_ID",&snapshot.id);
+        }
+        drop(snapshot);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -806,4 +818,53 @@ mod tests {
         }
         v.insert("BASE_NTRIP_Port".into(),"0".into());assert!(validate(&v).is_err());
     }
+}
+
+impl RealtimeRuntime {
+ pub fn satellites(&self,run_id:&str,enabled:bool)->Result<Value,String>{
+  let (id,state,directory)={let d=self.data.lock().unwrap();(d.id.clone(),d.state.clone(),d.output_dir.clone())};
+  if id!=run_id||directory.is_empty(){return Err("会话已改变".into());}
+  let root=Path::new(&directory);let request=root.join("satellites.request");
+  if !enabled{let _=fs::remove_file(request);return Ok(Value::Null);}
+  if state!="running"{return Ok(Value::Null);}
+  let capability:Value=serde_json::from_slice(&fs::read(self.engine_dir.join("manifest.json")).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+  if capability["capabilities"]["satellite_snapshot"]!=2{return Err("此引擎不支持卫星快照".into());}
+  fs::write(&request,(Utc::now().timestamp()+5).to_string()).map_err(|e|e.to_string())?;
+  let file=root.join("satellites.json");let Ok(meta)=fs::metadata(&file) else{return Ok(Value::Null);};
+  if meta.len()>262144{return Err("卫星快照超过大小限制".into());}
+  use std::io::Read;
+  let mut bytes=Vec::with_capacity(meta.len() as usize);
+  fs::File::open(file).map_err(|e|e.to_string())?.take(262145).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
+  if bytes.len()>262144{return Err("卫星快照超过大小限制".into());}
+  let value:Value=serde_json::from_slice(&bytes).map_err(|e|e.to_string())?;
+  validate_satellite_snapshot(&value,run_id)?;Ok(value)
+ }
+}
+fn validate_satellite_snapshot(value:&Value,run_id:&str)->Result<(),String>{
+ if value["schemaVersion"]!=1||value["runId"]!=run_id||value["sequence"].as_u64().is_none_or(|n|n==0)||value["week"].as_u64().is_none_or(|n|n>9999)||value["publishedAt"].as_i64().is_none_or(|n|n<=0||n>Utc::now().timestamp()+10)||value["tow"].as_f64().is_none_or(|v|!v.is_finite()||!(0.0..604800.0).contains(&v)){return Err("卫星快照版本、会话或历元无效".into());}
+ let rows=value["satellites"].as_array().ok_or("卫星快照缺少列表")?;if rows.len()>512{return Err("卫星数量超限".into());}
+ let mut seen=std::collections::HashSet::new();
+ for row in rows{let prn=row["prn"].as_str().ok_or("无效 PRN")?;if prn.len()!=3||!matches!(prn.as_bytes()[0],b'G'|b'C'|b'E'|b'R'|b'J')||!prn.as_bytes()[1..].iter().all(u8::is_ascii_digit)||!seen.insert(prn){return Err("无效或重复 PRN".into());}
+  for (key,min,max) in [("azimuth",0.,360.),("elevation",0.,90.)]{if !row[key].is_null()&&row[key].as_f64().is_none_or(|v|!v.is_finite()||v<min||v>max){return Err("无效卫星角度".into());}}
+  let system=match prn.as_bytes()[0]{b'G'=>"GPS",b'C'=>"BDS",b'E'=>"GAL",b'R'=>"GLO",_=>"QZSS"};
+  if row["system"]!=system||(!row["used"].is_null()&&!row["used"].is_boolean()){return Err("无效星座或参与状态".into());}
+  let signals=row["signals"].as_array().ok_or("无效卫星信号列表")?;if signals.len()>16{return Err("卫星信号数量超限".into());}
+  let mut slots=std::collections::HashSet::new();
+  for signal in signals{
+   if signal["slot"].as_u64().is_none_or(|n|n>15||!slots.insert(n))||signal["band"].as_str().is_none_or(|s|s.is_empty()||s.len()>12||!s.bytes().all(|c|c.is_ascii_alphanumeric()))||signal["signal"].as_str().is_none_or(|s|s.len()!=2||!s.bytes().all(|c|c.is_ascii_alphanumeric()))||(!signal["used"].is_null()&&!signal["used"].is_boolean())||(!signal["cn0"].is_null()&&signal["cn0"].as_f64().is_none_or(|n|!n.is_finite()||!(0.0..=100.0).contains(&n))){return Err("无效卫星频点或载噪比".into());}
+  }
+ }
+ Ok(())
+}
+
+#[cfg(test)]mod satellite_tests{
+ use super::*;
+ #[test]fn rejects_partial_wrong_session_and_invalid_signal_snapshots(){
+  let valid=json!({"schemaVersion":1,"runId":"run","sequence":1,"week":2440,"tow":100.,"publishedAt":Utc::now().timestamp(),"satellites":[{"prn":"G01","system":"GPS","azimuth":null,"elevation":null,"used":null,"signals":[{"slot":0,"band":"L1","signal":"1C","cn0":null,"used":null}]}]});
+  assert!(validate_satellite_snapshot(&valid,"run").is_ok());assert!(validate_satellite_snapshot(&valid,"other").is_err());
+  let mut v=valid.clone();v["satellites"][0]["signals"][0]["cn0"]=json!(999.);assert!(validate_satellite_snapshot(&v,"run").is_err());
+  let mut v=valid.clone();v["satellites"][0]["system"]=json!("BDS");assert!(validate_satellite_snapshot(&v,"run").is_err());
+  let mut v=valid.clone();v["satellites"].as_array_mut().unwrap().push(valid["satellites"][0].clone());assert!(validate_satellite_snapshot(&v,"run").is_err());
+  assert!(validate_satellite_snapshot(&json!({"schemaVersion":1}),"run").is_err());
+ }
 }

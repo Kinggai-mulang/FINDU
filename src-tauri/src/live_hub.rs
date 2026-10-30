@@ -12,7 +12,7 @@ impl LiveHub {
   let runtime=sessions.get(&key).cloned().unwrap_or_else(||RealtimeRuntime::new(self.engine.clone(),self.root.clone()).with_library(self.library.clone()));
   runtime.start(request)?;runtime.set_key(&key);sessions.insert(key.clone(),runtime);*self.latest.lock().unwrap()=Some(key.clone());Ok(key)
  }
- fn runtime(&self,key:Option<&str>)->Result<RealtimeRuntime,String>{let selected=key.map(str::to_string).or_else(||self.latest.lock().unwrap().clone()).ok_or("尚未创建实时会话")?;self.sessions.lock().unwrap().get(&selected).cloned().ok_or("会话不存在或已移除".into())}
+ pub(crate) fn runtime(&self,key:Option<&str>)->Result<RealtimeRuntime,String>{let selected=key.map(str::to_string).or_else(||self.latest.lock().unwrap().clone()).ok_or("尚未创建实时会话")?;self.sessions.lock().unwrap().get(&selected).cloned().ok_or("会话不存在或已移除".into())}
  pub fn snapshot(&self,key:Option<&str>)->Result<LiveSnapshot,String>{if key.is_none()&&self.latest.lock().unwrap().is_none(){return Ok(LiveSnapshot{state:"idle".into(),..Default::default()});}Ok(self.runtime(key)?.snapshot())}
  pub fn overview(&self)->Vec<LiveSnapshot>{self.sessions.lock().unwrap().values().map(RealtimeRuntime::summary).collect()}
  pub fn stop(&self,key:Option<&str>)->Result<(),String>{self.runtime(key)?.stop();Ok(())}

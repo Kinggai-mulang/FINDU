@@ -111,29 +111,19 @@ pub fn diagnostic(fields: &HashMap<&str, &str>) -> Result<serde_json::Value, Str
     Ok(serde_json::Value::Object(m))
 }
 
-pub fn find_solution_log(root: &Path) -> Option<PathBuf> {
-    for entry in fs::read_dir(root).ok()?.flatten() {
-        let p = entry.path();
-        if p.is_dir() {
-            if let Some(log) = find_solution_log(&p) {
-                return Some(log);
-            }
-        } else if p.extension().is_some_and(|e| e == "log")
-            && p.file_name().is_some_and(|e| e != "console.log")
-        {
-            let file = fs::File::open(&p).ok()?;
-            if BufReader::new(file)
-                .lines()
-                .take(256)
-                .flatten()
-                .any(|l| l.split_whitespace().any(|s| s == "Log=4"))
-            {
-                return Some(p);
-            }
+pub fn find_solution_logs(root:&Path)->Vec<PathBuf>{
+    let mut logs=Vec::new();
+    let Ok(entries)=fs::read_dir(root) else{return logs;};
+    for entry in entries.flatten(){let p=entry.path();
+        if entry.file_type().is_ok_and(|t|t.is_symlink()){continue;}
+        if p.is_dir(){logs.extend(find_solution_logs(&p));}
+        else if p.extension().is_some_and(|e|e.eq_ignore_ascii_case("log"))&&p.file_name().is_some_and(|e|!e.eq_ignore_ascii_case("console.log")){
+            if let Ok(file)=fs::File::open(&p){if BufReader::new(file).lines().take(256).map_while(Result::ok).any(|l|l.split_whitespace().any(|s|s=="Log=4")){logs.push(p);}}
         }
     }
-    None
+    logs.sort();logs
 }
+pub fn find_solution_log(root:&Path)->Option<PathBuf>{let mut paths=find_solution_logs(root);if paths.len()==1{paths.pop()}else{None}}
 
 pub fn quality_name(q: u8) -> &'static str {
     match q {
@@ -357,4 +347,9 @@ mod tests {
         assert!(read_solution(&path, None).is_err());
         fs::remove_file(path).unwrap();
     }
+}
+
+#[cfg(test)]mod filename_tests{
+ use super::*;
+ #[test]fn case_names_and_uppercase_extension_are_content_discovered(){let root=std::env::temp_dir().join(format!("named-results-{}",uuid::Uuid::new_v4()));fs::create_dir(&root).unwrap();let first=root.join("rover_STA_BetaV0.611.LOG");fs::write(&first,"# Program : IPSPOS BetaV0.611 Log=4\n").unwrap();fs::write(root.join("NTRIP.log"),"# StatusLog=1").unwrap();assert_eq!(find_solution_log(&root),Some(first.clone()));let second=root.join("rover_KIN_BetaV0.611.log");fs::write(&second,"# Program : IPSPOS Log=4\n").unwrap();assert_eq!(find_solution_logs(&root).len(),2);assert!(find_solution_log(&root).is_none());for p in [first,second,root.join("NTRIP.log")]{fs::remove_file(p).unwrap();}fs::remove_dir(root).unwrap();}
 }

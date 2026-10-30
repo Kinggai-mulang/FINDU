@@ -14,6 +14,11 @@ mod live_hub;
 use tauri::Manager;
 
 #[tauri::command]
+async fn analysis_candidates(path:String)->Result<Vec<String>,String>{
+    tauri::async_runtime::spawn_blocking(move||{let input=std::path::Path::new(&path);if !input.is_dir(){return vec![path];}results::find_solution_logs(input).iter().map(|p|options::display_path(p)).collect()}).await.map_err(|e|e.to_string())
+}
+
+#[tauri::command]
 async fn import_analysis(paths:Vec<String>,library:tauri::State<'_,std::sync::Arc<library::Library>>)->Result<Vec<results::RealResult>,String>{
     let lib=library.inner().clone();tauri::async_runtime::spawn_blocking(move||lib.import(paths)).await.map_err(|e|e.to_string())?
 }
@@ -127,6 +132,12 @@ fn open_folder(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+async fn realtime_satellites(session_id:String,run_id:String,enabled:bool,hub:tauri::State<'_,live_hub::LiveHub>)->Result<serde_json::Value,String>{
+    let runtime=hub.runtime(Some(&session_id))?;
+    tauri::async_runtime::spawn_blocking(move||runtime.satellites(&run_id,enabled)).await.map_err(|e|e.to_string())?
+}
+
 fn main() {
     let paths = paths::RuntimePaths::new(paths::workspace(
         &std::env::current_exe().expect("program path"),
@@ -181,7 +192,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            products::dismiss_products,products::product_jobs,products::start_product,products::retry_product,products::cancel_product,products::open_product_folder,products::create_post_document,
+            products::retry_product_dcb,products::set_product_date,products::dismiss_products,products::product_jobs,products::start_product,products::retry_product,products::cancel_product,products::open_product_folder,products::create_post_document,
             engine_info,
             import_opts,
             input_path::validate_input_path,
@@ -194,11 +205,12 @@ fn main() {
             start_realtime,
             stop_realtime,
             realtime_snapshot,
+            realtime_satellites,
             runtime_paths,
             dismiss_native,
             open_native_folder,
             open_live_folder
-            ,import_analysis,analysis_catalog,open_analysis,forget_analysis,realtime_overview,stop_all_realtime,remove_realtime,realtime_results
+            ,import_analysis,analysis_candidates,analysis_catalog,open_analysis,forget_analysis,realtime_overview,stop_all_realtime,remove_realtime,realtime_results
         ])
         .build(context)
         .expect("FINDYOU desktop startup failed")

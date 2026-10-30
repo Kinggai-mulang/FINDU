@@ -25,6 +25,7 @@ execFileSync(path.resolve(output,'product-runtime/python.exe'),['-I','-B','-c',
 await mkdir(path.join(output,'engine-tools'),{recursive:true});
 await copyFile('scripts/engine-bundle.py',path.join(output,'engine-tools/engine-bundle.py'));
 for(const [source,dest] of [['docs/ENGINE-UPDATE.md','引擎更换说明.md'],[`docs/RELEASE-${version}.md`,'使用与版本说明.md'],['THIRD_PARTY_NOTICES.md','THIRD_PARTY_NOTICES.md']])await copyFile(source,path.join(output,dest));
+await copyFile(`docs/VALIDATION-${version}.md`,path.join(output,`VALIDATION-${version}.md`));
 const binary=await readFile(path.join(output,'FINDU.exe'));
 const manifest={name:'FINDU',version,platform:'windows-x64',mode:'ipspos',packagedAtUtc:new Date().toISOString(),file:'FINDU.exe',bytes:binary.length,sha256:createHash('sha256').update(binary).digest('hex'),engine:{buildId:engine.build_id,sourceSha256:engine.source_sha256,sourceModified:engine.source_modified,protocols:engine.protocols,commit:engine.commit,version:engine.ipspos_version,sha256:engine.solver_sha256,clientSha256:engine.client_sha256},requires:['Microsoft Edge WebView2 Runtime','engine/IPSPOS.exe','engine/IPSClient.exe','engine/manifest.json','product-tools/findyou_products.py','product-tools/atomic_io.py','product-tools/antenna_cache.py','product-runtime/python.exe'],signed:false};
 await writeFile(path.join(output,'build-info.json'),JSON.stringify(manifest,null,2)+'\n');

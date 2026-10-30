@@ -15,17 +15,20 @@ pub fn validate(path: &str, role: &str) -> Result<String, String> {
         }
         let mut buf = [0_u8; 4096];
         let n = fs::File::open(&path).map_err(|e| e.to_string())?.read(&mut buf).map_err(|e| e.to_string())?;
-        if n == 0 {return Err("文件为空，原路径未改变".into());}
+        if n == 0 {return Err("文件为空".into());}
+        if role=="GNSS_DCBFile" {crate::options::validate_dcb_file(&path)?;return Ok(crate::options::display_path(&path));}
         let header = String::from_utf8_lossy(&buf[..n]);
         let rinex = header.lines().next().unwrap_or("");
         let obs = rinex.contains("RINEX VERSION / TYPE") && (rinex.contains("OBSERVATION") || rinex.chars().nth(20)==Some('O'));
         let nav = rinex.contains("RINEX VERSION / TYPE") && (rinex.contains("NAVIGATION") || matches!(rinex.chars().nth(20),Some('N'|'G'|'H'|'J'|'L')));
         let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
         let valid = match role {
-            "GNSS_RoveFile"|"GNSS_BaseFile" => obs || (!nav && matches!(ext.as_str(),"rtcm"|"rtcm3"|"bin"|"raw"|"dat")),
+            "GNSS_RoveFile"|"GNSS_BaseFile" => obs || (!nav && matches!(ext.as_str(),"rtcm"|"rtcm3"|"bin"|"raw"|"dat"|"oem"|"ubx"|"unicore")),
             "GNSS_NaviFile" => nav,
             "GNSS_SP3File" => ext=="sp3" && header.starts_with('#'),
             "GNSS_CLKFile" => ext=="clk" && (header.contains("RINEX VERSION / TYPE")||header.lines().any(|l|l.starts_with("AS "))),
+            "GNSS_CLASGridFile" => ext=="def",
+            "GNSS_PolyFile" => ext=="poly",
             "GNSS_BIAFile" => matches!(ext.as_str(),"bia"|"bsx"),
             "GNSS_ATXFile" => ext=="atx" && header.contains("ANTEX VERSION / SYST"),
             "GNSS_RefFile" => matches!(ext.as_str(),"ref"|"txt"),

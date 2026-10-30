@@ -7,6 +7,7 @@ import json, argparse, gzip, copy
 from urllib.parse import urlsplit
 import prepare as core
 from transfer import Transfer
+from observations import NeedsDate
 ROOT = Path(__file__).resolve().parent
 
 
@@ -126,7 +127,7 @@ def run(request_file):
         if antenna.is_file(): roots.append(str(antenna.parent))
     args = argparse.Namespace(repo=str(ROOT), fast_root=str(ROOT/'ThirdParty/FAST'), observation=request['observation'],
         out=str(folder), centers=','.join(request['centers']), grade=request['grade'], mode=request['mode'], motion=request['motion'],
-        systems=None, date=None, utc_offset=None, antenna_model=None, template=str(ROOT/'opt/IPSPOS.opt'),
+        systems=None, date=request.get("observationDate") or None, utc_offset=None, antenna_model=None, template=str(ROOT/'opt/IPSPOS.opt'),
         cache=request['cache'], local_root=roots, include_rts=False, orbit_margin=900, clock_margin=30,
         bias_time_system=None, offline=request['offline'], workers=request['workers'], timeout=request['timeout'], attempts=request['attempts'])
     plan_file = folder/'plan.json'
@@ -137,8 +138,6 @@ def run(request_file):
             header = stream.read(4096)
         if b'COMPACT RINEX FORMAT' in header:
             raise ValueError('Hatanaka 压缩观测需先转换为 RINEX O 文件')
-        if b'RINEX VERSION / TYPE' not in header:
-            raise ValueError('不是可识别的 RINEX O 观测文件，请检查文件格式')
         core.plan(args)
     args.plan = str(plan_file)
     result = core.fetch(args)
@@ -148,7 +147,13 @@ def run(request_file):
 
 if __name__ == '__main__':
     try:
+        if len(sys.argv)>2 and sys.argv[2]=='--dcb':
+            from optional_dcb import run as prepare_dcb
+            sys.exit(prepare_dcb(sys.argv[1]))
         sys.exit(run(sys.argv[1]))
+    except NeedsDate as exc:
+        print(json.dumps({'status':'needs_date','message':str(exc)},ensure_ascii=False),file=sys.stderr,flush=True)
+        sys.exit(4)
     except Exception as exc:
         print(json.dumps({'status':'error','message':str(exc)},ensure_ascii=False),file=sys.stderr,flush=True)
         sys.exit(2)

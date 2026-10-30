@@ -27,6 +27,10 @@ __pycache__/
 !/tests/*.test.ts
 !/tests/ui-smoke.mjs
 !/tests/ui-values.mjs
+!/tests/native-observation.py
+!/tests/products-optional.py
+!/tests/satellites-ui.mjs
+!/tests/realtime-replay.py
 # Publish maintained documentation, not local investigation evidence
 /docs/*
 !/docs/RELEASE-0.7.5.md
@@ -64,3 +68,5 @@ __pycache__/
 
 !/docs/RELEASE-0.7.8.md
 !/docs/VALIDATION-0.7.8.md
+!/docs/RELEASE-0.8.0.md
+!/docs/VALIDATION-0.8.0.md

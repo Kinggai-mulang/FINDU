@@ -7,6 +7,8 @@ Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、�
 
 当前正式版：**v0.7.8**，运行引擎 **IPSPOS BetaV0.605**（GNSS Log=4 / StatusLog=1）。
 
+当前源码及本地构建：**v0.8.0 / IPSPOS BetaV0.611**，新增 DCB 单文件配置、原生模式 0 观测检查、CLAS／PPP-RTK 后处理和实时卫星详情。未发布到远端；见 [0.8.0 版本说明](docs/RELEASE-0.8.0.md) 与 [验证记录](docs/VALIDATION-0.8.0.md)。
+
 ## 下载与运行
 
 从 [v0.7.8 正式发布](https://github.com/Kinggai-mulang/FINDU/releases/tag/v0.7.8) 下载 Windows x64 便携包，完整解压后双击 FINDU.exe。请整体保留 engine、product-tools、product-runtime 等目录。
@@ -15,7 +17,7 @@ Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、�
 
 ## 主要功能
 
-- **数据与下载**：读取 RINEX 观测时间范围，准备轨道、钟差、偏差、导航与天线产品，检查覆盖并生成后处理配置。
+- **数据与下载**：读取 RINEX、RTCM3、Unicore 及受支持混合观测的实际时段，准备主产品并独立尽力获取 DCB，检查覆盖并生成后处理配置。
 - **后处理**：最多 32 路并行；导入与编辑 OPT，排队运行独立解算进程，查看进度、日志、运行记录及可重新加载的结果。
 - **实时监控**：最多同时运行 16 路，每次最多对比 6 路方案；配置数据流，实时解算、回放或仅录制；切换页面保持后台会话和已有统计，返回后继续显示。
 - **分析对比**：位置、ENU、残差、产品时效及大气诊断；跨天曲线标注 UTC 日期，显示完整时间范围和覆盖日数。没有独立参考坐标时，ENU 表示相对位置变化。
@@ -44,7 +46,7 @@ pnpm desktop:package
 
 打包会实际导入随包 Python 的 SSL、socket、压缩、SQLite、ctypes 和产品下载模块；缺失原生运行扩展时立即失败。
 
-输出位于 deliverables/FINDU-0.7.8-windows-x64。仅运行 pnpm dev 是浏览器界面预览，真实解算需要桌面程序。UI 冒烟测试可在 pnpm dev 启动后运行 pnpm test:ui，需要本机 Microsoft Edge。实时指标桌面回归脚本为 `tests/realtime-display-desktop.mjs`，通过 `FINDYOU_CDP` 指定独立测试副本的调试地址；脚本要求目标没有运行中的实时会话。
+输出位于 deliverables/FINDU-0.8.0-windows-x64。仅运行 pnpm dev 是浏览器界面预览，真实解算需要桌面程序。UI 冒烟测试可在 pnpm dev 启动后运行 pnpm test:ui，需要本机 Microsoft Edge。实时指标桌面回归脚本为 `tests/realtime-display-desktop.mjs`，通过 `FINDYOU_CDP` 指定独立测试副本的调试地址；脚本要求目标没有运行中的实时会话。
 
 ## 仓库范围与数据
 

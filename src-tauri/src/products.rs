@@ -4,8 +4,9 @@ use std::{fs,path::{Path,PathBuf},sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}
 use crate::{options, native::Job};
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
-pub struct Request {pub observation:String,pub centers:Vec<String>,pub grade:String,pub mode:String,pub motion:String,pub download_antenna:bool,pub antenna_path:String,pub local_root:String,pub switch_source:bool,pub offline:bool,pub workers:usize,pub timeout:u64,pub attempts:usize}
+pub struct Request {pub observation:String,#[serde(default)]pub observation_date:String,#[serde(default)]pub dcb_path:String,pub centers:Vec<String>,pub grade:String,pub mode:String,pub motion:String,pub download_antenna:bool,pub antenna_path:String,pub local_root:String,pub switch_source:bool,pub offline:bool,pub workers:usize,pub timeout:u64,pub attempts:usize}
 impl Request {fn validate(&self)->Result<(),String>{
+ if !self.observation_date.is_empty()&&chrono::NaiveDate::parse_from_str(&self.observation_date,"%Y-%m-%d").is_err(){return Err("观测日期须为 YYYY-MM-DD（GPST）".into());}
  if !Path::new(&self.observation).is_file(){return Err("观测文件不存在".into());}
  if self.centers.is_empty()||self.centers.len()>3||self.centers.iter().any(|c| !["WHU","COD","GFZ"].contains(&c.as_str())){return Err("请选择有效产品中心".into());}
  if !["final","rapid","ultra","rts","best"].contains(&self.grade.as_str())||!["ar","float"].contains(&self.mode.as_str())||!["static","kinematic"].contains(&self.motion.as_str()){return Err("产品策略无效".into());}
@@ -16,8 +17,8 @@ impl Request {fn validate(&self)->Result<(),String>{
 #[derive(Clone,Serialize,Deserialize)]
 #[serde(rename_all="camelCase")]
 pub struct ProductJob {pub id:String,pub name:String,pub status:String,pub created_at:String,pub request:Request,pub directory:String,pub error:Option<String>}
-struct Inner {jobs:Vec<ProductJob>,cancel:HashMap<String,Arc<AtomicBool>>}
-#[derive(Clone)] pub struct Products {root:PathBuf,tools:PathBuf,python:PathBuf,data:Arc<Mutex<Inner>>,gate:Arc<Mutex<()>>}
+struct Inner {jobs:Vec<ProductJob>,cancel:HashMap<String,Arc<AtomicBool>>,optional:HashMap<String,Arc<AtomicBool>>}
+#[derive(Clone)] pub struct Products {root:PathBuf,tools:PathBuf,python:PathBuf,data:Arc<Mutex<Inner>>,gate:Arc<Mutex<()>>,dcb_gate:Arc<Mutex<()>>}
 fn active(s:&str)->bool{["queued","running"].contains(&s)}
 fn read(path:&Path)->Value{fs::read(path).ok().and_then(|b|serde_json::from_slice(&b).ok()).unwrap_or(Value::Null)}
 fn persist(job:&ProductJob){if let Ok(bytes)=serde_json::to_vec_pretty(job){let p=Path::new(&job.directory).join("job.json");let t=p.with_extension("tmp");if fs::write(&t,bytes).is_ok(){let _=fs::rename(t,p);}}}
@@ -27,38 +28,54 @@ impl Products {
  if let Ok(entries)=fs::read_dir(&dir){for entry in entries.flatten(){let p=entry.path();if !p.is_dir()||p.join(".queue-removed").exists(){continue;}if let Ok(mut job)=serde_json::from_value::<ProductJob>(read(&p.join("job.json"))){
  // A restored record cannot redirect retries outside this owned folder.
  if uuid::Uuid::parse_str(&job.id).is_err()||p.file_name().and_then(|s|s.to_str())!=Some(&job.id){continue;}
- job.directory=options::display_path(&p);if active(&job.status){job.status="interrupted".into();job.error=Some("上次运行中断，可重试以复用缓存".into());persist(&job);}jobs.push(job);}}}
+ job.directory=options::display_path(&p);if active(&job.status){job.status="interrupted".into();job.error=Some("上次运行中断，可重试以复用缓存".into());persist(&job);}if read(&p.join("dcb.json"))["status"].as_str().is_some_and(active){let _=fs::write(p.join("dcb.json"),br#"{"status":"unavailable","message":"DCB preparation interrupted; retry only DCB"}"#);}jobs.push(job);}}}
  jobs.sort_by(|a,b|b.created_at.cmp(&a.created_at));
- Self{root,tools,python,data:Arc::new(Mutex::new(Inner{jobs,cancel:HashMap::new()})),gate:Arc::new(Mutex::new(()))}}
+ Self{root,tools,python,data:Arc::new(Mutex::new(Inner{jobs,cancel:HashMap::new(),optional:HashMap::new()})),gate:Arc::new(Mutex::new(())),dcb_gate:Arc::new(Mutex::new(()))}}
  pub fn start(&self,request:Request)->Result<String,String>{request.validate()?;if !self.python.is_file()||!self.tools.join("findyou_products.py").is_file(){return Err("产品下载组件缺失，请使用完整便携包".into());}
  let mut d=self.data.lock().unwrap();if d.jobs.iter().filter(|j|active(&j.status)).count()>=10{return Err("准备队列最多 10 项，请等待或取消".into());}
  let id=uuid::Uuid::new_v4().to_string();let path=self.root.join("downloads").join(&id);fs::create_dir_all(&path).map_err(|e|e.to_string())?;
  let job=ProductJob{id:id.clone(),name:Path::new(&request.observation).file_name().unwrap().to_string_lossy().into(),created_at:chrono::Utc::now().to_rfc3339(),status:"queued".into(),request,directory:options::display_path(&path),error:None};
  persist(&job);d.jobs.insert(0,job);drop(d);self.dispatch(id.clone());Ok(id)}
- pub fn retry(&self,id:&str)->Result<(),String>{let mut d=self.data.lock().unwrap();if d.jobs.iter().filter(|j|active(&j.status)).count()>=10{return Err("准备队列已满".into());}let j=d.jobs.iter_mut().find(|j|j.id==id).ok_or("任务不存在")?;if active(&j.status){return Err("任务尚未结束".into());}j.request.validate()?;j.status="queued".into();j.error=None;persist(j);drop(d);self.dispatch(id.into());Ok(())}
+ pub fn retry(&self,id:&str)->Result<(),String>{let mut d=self.data.lock().unwrap();if d.optional.contains_key(id){return Err("DCB 正在准备，请结束后重试主产品".into());}if d.jobs.iter().filter(|j|active(&j.status)).count()>=10{return Err("准备队列已满".into());}let j=d.jobs.iter_mut().find(|j|j.id==id).ok_or("任务不存在")?;if active(&j.status){return Err("任务尚未结束".into());}j.request.validate()?;j.status="queued".into();j.error=None;persist(j);drop(d);self.dispatch(id.into());Ok(())}
  fn update(&self,id:&str,status:&str,error:Option<String>){let mut d=self.data.lock().unwrap();if let Some(j)=d.jobs.iter_mut().find(|j|j.id==id){j.status=status.into();j.error=error;persist(j);}if !active(status){d.cancel.remove(id);}}
  fn dispatch(&self,id:String){let cancelled=Arc::new(AtomicBool::new(false));self.data.lock().unwrap().cancel.insert(id.clone(),cancelled.clone());let rt=self.clone();std::thread::spawn(move||{
  let guard=loop{if cancelled.load(Ordering::SeqCst){rt.update(&id,"cancelled",None);return;}if let Ok(g)=rt.gate.try_lock(){break g;}std::thread::sleep(Duration::from_millis(100));};
  if cancelled.load(Ordering::SeqCst){rt.update(&id,"cancelled",None);return;}
  rt.update(&id,"running",None);
- let result=rt.execute(&id,&cancelled);
- if cancelled.load(Ordering::SeqCst){rt.update(&id,"cancelled",None);}else{match result {Ok(0)=>rt.update(&id,"ready",None),Ok(3)=>rt.update(&id,"incomplete",Some("部分产品缺失或未通过覆盖校验；展开查看详情后重试".into())),Ok(code)=>rt.update(&id,"failed",Some(format!("产品准备失败（{code}），请查看诊断"))),Err(e)=>rt.update(&id,"failed",Some(e))}}
+ let result=rt.execute(&id,&cancelled,false);
+ if cancelled.load(Ordering::SeqCst){rt.update(&id,"cancelled",None);}else{match result {Ok(0)=>rt.update(&id,"ready",None),Ok(4)=>rt.update(&id,"needs_date",Some("请补充观测 GPST 日期后继续".into())),Ok(3)=>rt.update(&id,"incomplete",Some("部分产品缺失或未通过覆盖校验；展开查看详情后重试".into())),Ok(code)=>rt.update(&id,"failed",Some(format!("产品准备失败（{code}），请查看诊断"))),Err(e)=>rt.update(&id,"failed",Some(e))}}
  rt.data.lock().unwrap().cancel.remove(&id);drop(guard);
+ if !cancelled.load(Ordering::SeqCst){let _=rt.retry_dcb(&id);}
  });}
- fn execute(&self,id:&str,cancelled:&AtomicBool)->Result<i32,String>{let job=self.data.lock().unwrap().jobs.iter().find(|j|j.id==id).cloned().ok_or("任务不存在")?;
+ fn execute(&self,id:&str,cancelled:&AtomicBool,optional:bool)->Result<i32,String>{let job=self.data.lock().unwrap().jobs.iter().find(|j|j.id==id).cloned().ok_or("任务不存在")?;
  let dir=PathBuf::from(&job.directory);let mut value=serde_json::to_value(&job.request).map_err(|e|e.to_string())?;value["cache"]=json!(options::display_path(&self.root.join("cache/products")));
  fs::write(dir.join("request.json"),serde_json::to_vec_pretty(&value).unwrap()).map_err(|e|e.to_string())?;
- let stderr=fs::File::create(dir.join("worker.log")).map_err(|e|e.to_string())?;let stdout=stderr.try_clone().map_err(|e|e.to_string())?;
- let mut cmd=Command::new(&self.python);cmd.args(["-I","-B"]).arg(self.tools.join("findyou_products.py")).arg(dir.join("request.json")).current_dir(&dir).env("TEMP",self.root.join("cache/temp")).env("TMP",self.root.join("cache/temp")).env("PYTHONDONTWRITEBYTECODE","1").env("PYTHONUTF8","1").stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+ let stderr=fs::File::create(dir.join(if optional{"dcb-worker.log"}else{"worker.log"})).map_err(|e|e.to_string())?;let stdout=stderr.try_clone().map_err(|e|e.to_string())?;
+ let scratch=dir.join("scratch");fs::create_dir_all(&scratch).map_err(|e|e.to_string())?;
+ let mut cmd=Command::new(&self.python);cmd.args(["-I","-B","-X","utf8"]).arg(self.tools.join("findyou_products.py")).arg(dir.join("request.json")).current_dir(&dir).env("TEMP",&scratch).env("TMP",&scratch).env("PYTHONDONTWRITEBYTECODE","1").env("PYTHONUTF8","1").stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
  #[cfg(windows)]{use std::os::windows::process::CommandExt;cmd.creation_flags(0x08000000);}
+ if optional{cmd.arg("--dcb");}
+ let started=std::time::Instant::now();
  let mut child=cmd.spawn().map_err(|e|format!("无法启动产品准备组件：{e}"))?;let _job=match Job::attach(&child){Ok(j)=>j,Err(e)=>{let _=child.kill();let _=child.wait();return Err(e);}};
- loop{if cancelled.load(Ordering::SeqCst){let _=child.kill();let _=child.wait();return Ok(-1);}match child.try_wait(){Ok(Some(s))=>{let code=s.code().unwrap_or(-1);if code!=0&&code!=3{let log=fs::read_to_string(dir.join("worker.log")).unwrap_or_default();if let Some(message)=log.lines().rev().filter_map(|l|serde_json::from_str::<Value>(l).ok()).find_map(|v|v["message"].as_str().map(str::to_owned)){return Err(message);}}return Ok(code);},Ok(None)=>std::thread::sleep(Duration::from_millis(150)),Err(e)=>return Err(e.to_string())}}
+ loop{if cancelled.load(Ordering::SeqCst)||(optional&&started.elapsed()>Duration::from_secs(60)){let _=child.kill();let _=child.wait();return Ok(-1);}match child.try_wait(){Ok(Some(s))=>{let code=s.code().unwrap_or(-1);if code!=0&&code!=3&&code!=4{let log=fs::read_to_string(dir.join(if optional{"dcb-worker.log"}else{"worker.log"})).unwrap_or_default();if let Some(message)=log.lines().rev().filter_map(|l|serde_json::from_str::<Value>(l).ok()).find_map(|v|v["message"].as_str().map(str::to_owned)){return Err(message);}}return Ok(code);},Ok(None)=>std::thread::sleep(Duration::from_millis(150)),Err(e)=>return Err(e.to_string())}}
  }
  pub fn cancel(&self,id:&str)->Result<(),String>{let d=self.data.lock().unwrap();let flag=d.cancel.get(id).ok_or("任务已结束")?;flag.store(true,Ordering::SeqCst);Ok(())}
- pub fn stop_all(&self){for flag in self.data.lock().unwrap().cancel.values(){flag.store(true,Ordering::SeqCst);}}
- pub fn dismiss(&self,ids:Option<Vec<String>>)->Result<(),String>{let mut d=self.data.lock().unwrap();let selected=ids.unwrap_or_else(||d.jobs.iter().filter(|j|!active(&j.status)).map(|j|j.id.clone()).collect());if d.jobs.iter().any(|j|selected.contains(&j.id)&&active(&j.status)){return Err("请先取消任务，结束后再移除".into());}for j in d.jobs.iter().filter(|j|selected.contains(&j.id)){fs::write(Path::new(&j.directory).join(".queue-removed"),b"removed; outputs retained").map_err(|e|e.to_string())?;}d.jobs.retain(|j|!selected.contains(&j.id));for id in selected{d.cancel.remove(&id);}Ok(())}
+ pub fn stop_all(&self){let d=self.data.lock().unwrap();for flag in d.cancel.values().chain(d.optional.values()){flag.store(true,Ordering::SeqCst);}}
+ pub fn set_date(&self,id:&str,date:String)->Result<(),String>{if chrono::NaiveDate::parse_from_str(&date,"%Y-%m-%d").is_err(){return Err("日期须为 YYYY-MM-DD（GPST）".into());}{let mut d=self.data.lock().unwrap();let j=d.jobs.iter_mut().find(|j|j.id==id).ok_or("任务不存在")?;if j.status!="needs_date"{return Err("任务没有等待日期".into());}j.request.observation_date=date;persist(j);}self.retry(id)}
+ pub fn retry_dcb(&self,id:&str)->Result<(),String>{
+  let mut d=self.data.lock().unwrap();let job=d.jobs.iter().find(|j|j.id==id).cloned().ok_or("任务不存在")?;
+  if active(&job.status)||!read(&Path::new(&job.directory).join("work/manifest.json"))["results"].as_array().is_some_and(|rs|rs.iter().any(|r|r["status"]=="ready")){return Err("主产品尚未就绪".into());}
+  if d.optional.contains_key(id){return Err("DCB 已在准备中".into());}
+  let cancelled=Arc::new(AtomicBool::new(false));d.optional.insert(id.into(),cancelled.clone());drop(d);
+  let rt=self.clone();let id=id.to_string();let state=Path::new(&job.directory).join("dcb.json");let _=fs::write(&state,b"{\"status\":\"queued\"}");
+  std::thread::spawn(move||{let guard=loop{if cancelled.load(Ordering::SeqCst){let _=fs::write(&state,br#"{"status":"unavailable","message":"DCB preparation cancelled; primary products retained"}"#);rt.data.lock().unwrap().optional.remove(&id);return;}if let Ok(g)=rt.dcb_gate.try_lock(){break g;}std::thread::sleep(Duration::from_millis(100));};
+   let result=rt.execute(&id,&cancelled,true);if !matches!(result,Ok(0)){let _=fs::write(&state,br#"{"status":"unavailable","message":"DCB preparation interrupted; primary products retained"}"#);}
+   rt.data.lock().unwrap().optional.remove(&id);drop(guard);
+  });Ok(())
+ }
+ pub fn dismiss(&self,ids:Option<Vec<String>>)->Result<(),String>{let mut d=self.data.lock().unwrap();let selected=ids.unwrap_or_else(||d.jobs.iter().filter(|j|!active(&j.status)).map(|j|j.id.clone()).collect());if d.jobs.iter().any(|j|selected.contains(&j.id)&&active(&j.status)){return Err("请先取消任务，结束后再移除".into());}for j in d.jobs.iter().filter(|j|selected.contains(&j.id)){fs::write(Path::new(&j.directory).join(".queue-removed"),b"removed; outputs retained").map_err(|e|e.to_string())?;if let Some(flag)=d.optional.get(&j.id){flag.store(true,Ordering::SeqCst);}}d.jobs.retain(|j|!selected.contains(&j.id));for id in selected{d.cancel.remove(&id);}Ok(())}
  pub fn directory(&self,id:&str)->Result<PathBuf,String>{self.data.lock().unwrap().jobs.iter().find(|j|j.id==id).map(|j|PathBuf::from(&j.directory)).ok_or("任务不存在".into())}
- pub fn snapshot(&self)->Value{let jobs=self.data.lock().unwrap().jobs.clone();json!(jobs.iter().take(100).map(|j|{let dir=PathBuf::from(&j.directory);let log=fs::read_to_string(dir.join("worker.log")).unwrap_or_default();let log=log.lines().rev().take(35).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");let plan=read(&dir.join("work/plan.json"));let mut m=if !active(&j.status){read(&dir.join("work/manifest.json"))}else{Value::Null};if let Some(rows)=m.get_mut("results").and_then(Value::as_array_mut){for row in rows{if row["status"]=="ready"&&!row["opt"].as_str().is_some_and(|p|Path::new(p).is_file()){row["status"]=json!("failed");row["opt"]=Value::Null;row["check"]["warnings"]=json!(["已生成的 OPT 已移动或在重试中失效，请重试复用产品缓存"]);}}}let compact=if m.is_null(){Value::Null}else{json!({"ready":m["ready"],"warnings":m["execution"]["progressWarnings"].as_array().cloned().unwrap_or_default(),"results":m["results"].as_array().map(|rs|rs.iter().map(|r|json!({"id":r["id"],"status":r["status"],"bundle":r["bundle"],"opt":r["opt"],"preparationLevel":r["preparationLevel"],"effectiveMode":r["effectiveMode"],"check":{"errors":r["check"]["errors"].as_array().cloned().unwrap_or_default(),"warnings":r["check"]["warnings"].as_array().cloned().unwrap_or_default()},"skipped":r["skipped"].as_array().cloned().unwrap_or_default(),"failed_tasks":r["failed_tasks"]})).collect::<Vec<_>>()).unwrap_or_default()})};json!({"job":j,"plan":{"observation":plan["observation"],"tasks":plan["tasks"]},"progress":read(&dir.join("work/progress.json")),"manifest":compact,"log":log})}).collect::<Vec<_>>())}
+ pub fn snapshot(&self)->Value{let jobs=self.data.lock().unwrap().jobs.clone();json!(jobs.iter().take(100).map(|j|{let dir=PathBuf::from(&j.directory);let log=fs::read_to_string(dir.join("worker.log")).unwrap_or_default();let log=log.lines().rev().take(35).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");let plan=read(&dir.join("work/plan.json"));let mut m=if !active(&j.status){read(&dir.join("work/manifest.json"))}else{Value::Null};if let Some(rows)=m.get_mut("results").and_then(Value::as_array_mut){for row in rows{if row["status"]=="ready"&&!row["opt"].as_str().is_some_and(|p|Path::new(p).is_file()){row["status"]=json!("failed");row["opt"]=Value::Null;row["check"]["warnings"]=json!(["已生成的 OPT 已移动或在重试中失效，请重试复用产品缓存"]);}}}let compact=if m.is_null(){Value::Null}else{json!({"ready":m["ready"],"warnings":m["execution"]["progressWarnings"].as_array().cloned().unwrap_or_default(),"results":m["results"].as_array().map(|rs|rs.iter().map(|r|json!({"id":r["id"],"status":r["status"],"bundle":r["bundle"],"opt":r["opt"],"preparationLevel":r["preparationLevel"],"effectiveMode":r["effectiveMode"],"check":{"errors":r["check"]["errors"].as_array().cloned().unwrap_or_default(),"warnings":r["check"]["warnings"].as_array().cloned().unwrap_or_default()},"skipped":r["skipped"].as_array().cloned().unwrap_or_default(),"failed_tasks":r["failed_tasks"]})).collect::<Vec<_>>()).unwrap_or_default()})};json!({"job":j,"dcb":read(&dir.join("dcb.json")),"plan":{"observation":plan["observation"],"tasks":plan["tasks"]},"progress":read(&dir.join("work/progress.json")),"manifest":compact,"log":log})}).collect::<Vec<_>>())}
 
 }
 #[tauri::command] pub fn product_jobs(rt:tauri::State<'_,Products>)->Value{rt.snapshot()}
@@ -73,7 +90,7 @@ impl Products {
 }
 #[cfg(test)] mod tests {
  use super::*;
- fn request(obs:&Path)->Request {Request{observation:options::display_path(obs),centers:vec!["WHU".into()],grade:"final".into(),mode:"ar".into(),motion:"static".into(),download_antenna:true,antenna_path:String::new(),local_root:String::new(),switch_source:true,offline:true,workers:4,timeout:10,attempts:2}}
+ fn request(obs:&Path)->Request {Request{observation:options::display_path(obs),observation_date:String::new(),dcb_path:String::new(),centers:vec!["WHU".into()],grade:"final".into(),mode:"ar".into(),motion:"static".into(),download_antenna:true,antenna_path:String::new(),local_root:String::new(),switch_source:true,offline:true,workers:4,timeout:10,attempts:2}}
  #[test] fn rejects_unsupported_profiles_before_launch(){let root=std::env::temp_dir().join(format!("products-test-{}",uuid::Uuid::new_v4()));fs::create_dir_all(&root).unwrap();let obs=root.join("obs.24o");fs::write(&obs,"test").unwrap();let mut r=request(&obs);assert!(r.validate().is_ok());r.grade="rts".into();r.centers.push("COD".into());assert!(r.validate().is_err());r.centers=vec!["WHU".into()];r.workers=0;assert!(r.validate().is_err());fs::remove_file(obs).unwrap();fs::remove_dir(root).unwrap();}
  #[test] fn restoration_marks_interrupted_and_pins_owned_path(){let root=std::env::temp_dir().join(format!("products-recovery-{}",uuid::Uuid::new_v4()));let id=uuid::Uuid::new_v4().to_string();let dir=root.join("downloads").join(&id);fs::create_dir_all(&dir).unwrap();let obs=dir.join("keep.24o");fs::write(&obs,"input unchanged").unwrap();let j=ProductJob{id:id.clone(),name:"recover".into(),status:"running".into(),created_at:"2026-10-17".into(),request:request(&obs),directory:"C:/untrusted".into(),error:None};fs::write(dir.join("job.json"),serde_json::to_vec(&j).unwrap()).unwrap();let rt=Products::new(root.clone(),root.clone(),root.clone());let snap=rt.snapshot();assert_eq!(snap[0]["job"]["status"],"interrupted");assert_eq!(rt.directory(&id).unwrap(),dir);assert_eq!(fs::read_to_string(obs).unwrap(),"input unchanged");}
  #[test] fn terminal_queue_removal_survives_restart_without_deleting_outputs(){let root=std::env::temp_dir().join(format!("products-dismiss-{}",uuid::Uuid::new_v4()));let id=uuid::Uuid::new_v4().to_string();let dir=root.join("downloads").join(&id);fs::create_dir_all(&dir).unwrap();let obs=dir.join("keep.24o");fs::write(&obs,"input").unwrap();let job=ProductJob{id:id.clone(),name:"remove".into(),status:"incomplete".into(),created_at:"2026-10-18".into(),request:request(&obs),directory:options::display_path(&dir),error:None};persist(&job);let rt=Products::new(root.clone(),root.clone(),root.clone());rt.dismiss(None).unwrap();assert_eq!(rt.snapshot(),json!([]));assert_eq!(Products::new(root.clone(),root.clone(),root).snapshot(),json!([]));assert!(obs.is_file());}
@@ -86,3 +103,6 @@ impl Products {
 }
 
 #[tauri::command] pub fn dismiss_products(ids:Option<Vec<String>>,rt:tauri::State<'_,Products>)->Result<(),String>{rt.dismiss(ids)}
+
+#[tauri::command] pub fn retry_product_dcb(id:String,rt:tauri::State<'_,Products>)->Result<(),String>{rt.retry_dcb(&id)}
+#[tauri::command] pub fn set_product_date(id:String,date:String,rt:tauri::State<'_,Products>)->Result<(),String>{rt.set_date(&id,date)}

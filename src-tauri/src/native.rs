@@ -7,7 +7,7 @@ use crate::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fs,
     io::{Read, Seek, SeekFrom},
     path::{Path, PathBuf},
@@ -437,7 +437,9 @@ impl NativeRuntime {
                 source_base.to_path_buf()
             }
         };
-        let mut overrides = BTreeMap::new();
+        options::check_post_options(&options)?;
+        let (mut overrides, dcb_warnings) = options::dcb_overrides(&options, &base);
+        for warning in &dcb_warnings { self.log(id, "warn", warning.clone()); }
         let mut inputs = Vec::new();
         let rtk=matches!(options.get("GNSS_PMode").map(String::as_str),Some("6"|"7"|"8"));
         for key in options::FILE_KEYS {
@@ -462,6 +464,7 @@ impl NativeRuntime {
         overrides.insert("GNSS_FilePath".into(), options::engine_path(&dir)?);
         let mut text = task.request.document.text.clone();
         text.push_str("\n# FINDYOU isolated file paths; algorithm parameters retained.\n");
+        text.push_str(&format!("# DCB: {}\n",if dcb_warnings.is_empty(){if overrides.get("GNSS_bUseDCB").is_some_and(|s|s=="ON"){"validated input; actual use depends on SSR corrections".into()}else{"no usable DCB configured for this mode".into()}}else{dcb_warnings.join("; ").replace(['\r','\n']," ")}));
         for (k, v) in &overrides {
             text.push_str(&format!("{k} = {v};\n"));
         }
@@ -603,6 +606,8 @@ impl NativeRuntime {
             }
             return Err("IPSPOS 成功退出但没有找到 Log=4 定位输出，请检查输出配置".into());
         };
+        manifest["solutionLog"] = serde_json::json!(options::display_path(&path));
+        fs::write(dir.join("manifest.json"),serde_json::to_vec_pretty(&manifest).unwrap()).map_err(|e|e.to_string())?;
         let result = self.result_at(id, &path, reference, &info)?;
         fs::write(
             dir.join("result.json"),

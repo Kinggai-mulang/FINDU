@@ -4,11 +4,63 @@ import hashlib
 import mmap
 import re
 import statistics
+import json
+import subprocess
+import tempfile
+import os
+import shutil
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
 GPS0 = datetime(1980, 1, 6)
+
+
+class NeedsDate(ValueError):
+    pass
+
+
+def engine_path(path):
+    """The native C file API accepts ANSI/short paths on Windows."""
+    path = str(path)
+    if os.name == 'nt' and not path.isascii():
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(32768)
+        if not ctypes.windll.kernel32.GetShortPathNameW(path, buffer, len(buffer)) or not buffer.value.isascii():
+            raise ValueError('此观测路径无法转换为引擎可读路径，请放到英文路径后重试')
+        path = buffer.value
+    return path
+
+
+def native_observation(path, repo, date):
+    engine = Path(repo).parent / 'engine' / 'IPSPOS.exe'
+    if not engine.is_file():
+        raise ValueError('缺少支持模式 0 解码的 IPSPOS 引擎，请使用完整便携包')
+    manifest = json.loads((engine.parent / 'manifest.json').read_text(encoding='utf-8-sig'))
+    if manifest.get('capabilities', {}).get('observation_decode') != 1:
+        raise ValueError('当前引擎尚不支持模式 0 观测解码')
+    if date:
+        datetime.strptime(date, '%Y-%m-%d')
+    if any(c in str(path) for c in ';\r\n'):
+        raise ValueError('观测路径含 OPT 分隔符')
+    with tempfile.TemporaryDirectory(prefix='observation-') as folder:
+        folder = Path(engine_path(folder))
+        output = folder / 'observation.json'
+        opt = folder / 'decode.opt'
+        opt.write_text(f'GNSS_PMode = 0;\nGNSS_RoveFile = {engine_path(path)};\nGNSS_DecodeOutput = {output};\nGNSS_DecodeDate = {date or ""};\n', encoding='utf-8')
+        with (folder/'decode.log').open('wb') as log:
+            result = subprocess.run([str(engine), str(opt)], cwd=folder, stdin=subprocess.DEVNULL,
+                                    stdout=log, stderr=subprocess.STDOUT,
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode or not output.is_file():
+            raise ValueError('原生解码未发现有效观测或时间线异常；纯 UBX RAWX、仅导航/产品流不支持')
+        metadata = json.loads(output.read_text(encoding='utf-8'))
+        if metadata.get('status') == 'needs_date':
+            raise NeedsDate('观测流没有完整日期，请补充观测 GPST 日期后继续')
+        if metadata.get('status') != 'ok' or not metadata.get('satellites'):
+            raise ValueError('没有可用的原生观测历元')
+        metadata['decoder_build_id'] = manifest['build_id']
+        return metadata
 SYSTEMS = {'G': 'GPS', 'C': 'BDS', 'E': 'Galileo', 'R': 'GLONASS', 'J': 'QZSS', 'S': 'SBAS', 'I': 'NavIC'}
 CRC_TABLE = []
 for n in range(256):
@@ -302,8 +354,13 @@ def inspect(path, repo, date=None, utc_offset=None):
         result = rinex(path, utc_offset)
     else:
         if path.suffix.lower() == '.gz':
-            raise ValueError('压缩 RTCM 请先在独立目录解压')
-        result = rtcm(path, Path(repo), date, utc_offset)
+            with tempfile.TemporaryDirectory(prefix='raw-observation-') as folder:
+                raw = Path(folder)/'observation.bin'
+                with gzip.open(path,'rb') as source,raw.open('wb') as target:
+                    shutil.copyfileobj(source,target,1024*1024)
+                result = native_observation(raw, Path(repo), date)
+        else:
+            result = native_observation(path, Path(repo), date)
     result.update(path=str(path), size=before.st_size, sha256=sha(path), scanner_sha256=sha(Path(__file__)))
     if path.stat().st_mtime_ns != before.st_mtime_ns or path.stat().st_size != before.st_size:
         raise ValueError('识别过程中观测文件发生变化')

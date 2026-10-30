@@ -9,15 +9,17 @@ export const postFileFields: FileField[] = [
   {key:'GNSS_CLKFile', label:'精密钟差', hint:'CLK 钟差文件', group:'products', mode:'PPP'},
   {key:'GNSS_BIAFile', label:'精密偏差', hint:'BIA / BSX 偏差文件', group:'products', mode:'PPP'},
   {key:'GNSS_ATXFile', label:'天线模型', hint:'ANTEX / ATX 文件', group:'products', mode:'PPP'},
+  {key:'GNSS_DCBFile', label:'DCB（可选）', hint:'SSR 同频码偏差转换 · BIA / BSX；留空或不可用时自动关闭，实际使用由引擎判定', group:'products', mode:'PPP'},
   {key:'GNSS_RefFile', label:'参考文件', hint:'可选 REF，核对坐标框架与天线参考点', group:'reference'},
   {key:'GNSS_FilePath', label:'原输入根目录', hint:'导入 OPT 使用相对路径时的输入目录', group:'advanced', directory:true},
   {key:'GNSS_ProductFile', label:'产品回放流', hint:'SSR / B2b / HAS 录制文件', group:'advanced', mode:'PPP'},
   {key:'GNSS_BIASFile', label:'独立偏差回放流', hint:'独立 BIAS 录制文件', group:'advanced', mode:'PPP'},
+  {key:'GNSS_PolyFile', label:'POLY 大气文件', hint:'可选 POLY 文件', group:'advanced', mode:'PPP'},
 ];
 export const fieldsForMode = (mode?: string) => postFileFields.filter(f => !f.mode || f.mode === (isRtkMode(mode) ? 'RTK' : 'PPP'));
 
 export const isOptPath = (p: string) => /\.opt$/i.test(p);
-export const isObservationPath = (p: string) => /\.(?:\d{2}o|o|obs|rnx)(?:\.gz)?$/i.test(p);
+export const isObservationPath = (p: string) => !isOptPath(p);
 
 /** Hit testing uses CSS pixels, while Tauri reports physical pixels. Specific fields win. */
 export function dropTarget<T extends {rect: {left:number;right:number;top:number;bottom:number}; priority:number; accepts:(p:string)=>boolean}>(

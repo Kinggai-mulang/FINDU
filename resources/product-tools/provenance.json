@@ -11,8 +11,10 @@
     "ThirdParty/FAST/src/fast/bin/fast_download_src.json": "44d4ea4cac1507e04be199bb3dafb77fda9b754ddef5df73839cba50c15a0344",
     "ThirdParty/FAST/src/fast/bin/gzip.exe": "5ab48ea0bebacecf300a1b607aaf990c3ecba244d16b4d558c671709d67954ae",
     "ThirdParty/FAST/src/fast/bin/cygwin1.dll": "58de7038d1a6ea60ac1f566afe8ac2a5755d2cf4b6ccb72f884063b4a088ccf2",
-    "ThirdParty/FAST/LICENSE": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809"
+    "ThirdParty/FAST/LICENSE": "230184f60bae2feaf244f10a8bac053c8ff33a183bcc365b4d8b876d2b7f4809",
+    "scripts/gnss/product_analyze/formats.py": "ebabe8fc323f1af3ec345d8a5ba53239c02e81b364a8db996da68c2efe3bc872",
+    "scripts/gnss/product_download/dcb_update.py": "c1b94a3b272024819961f2cc98d8afe14b5440cb22ce6c9b4d5ff25c8a804bf7"
   },
   "note": "Independent FINDYOU copy. FAST license bundled in ThirdParty/FAST/LICENSE.",
-  "findyouChanges": "RTS basic orbit/clock OPT with explicit optional-product warnings; write_opt accepts absent optional NAV/ANTEX. Other grades retain strict preparation. Engine source is not changed."
+  "findyouChanges": "RINEX scanner retained; binary observations use bundled IPSPOS GNSS_PMode=0. Optional historical DSB queue uses copied dcb_update validator and Bias-SINEX reader; no dependency on IPSPOS source at runtime."
 }

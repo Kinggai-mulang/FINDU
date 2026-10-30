@@ -37,7 +37,7 @@ impl Library {
     pub fn forget(&self,id:&str)->Result<(),String>{let _lock=self.lock.lock().unwrap();let mut entries=self.entries()?;entries.retain(|e|e.id!=id);self.save(&entries)}
 }
 fn load(input:&Path)->Result<RealResult,String>{
-    let path=if input.is_dir(){results::find_solution_log(input).ok_or("目录中未找到带文件头的 Log=4，请选择单个任务/会话目录")?}else{input.to_path_buf()};
+    let path=if input.is_dir(){{let mut candidates=results::find_solution_logs(input);if candidates.len()>1{return Err(format!("目录中有多个结果，请选择具体日志：\n{}",candidates.iter().map(|p|p.display().to_string()).collect::<Vec<_>>().join("\n")));}candidates.pop().ok_or("目录中未找到 Log=4")?}}else{input.to_path_buf()};
     if !path.extension().is_some_and(|e|e.eq_ignore_ascii_case("log")){return Err("请选择 IPSPOS Log=4 .log 或单个结果目录".into());}
     let metadata=fs::metadata(&path).map_err(|_|"结果日志不存在或已被移动")?;
     if metadata.len()>256*1024*1024{return Err("单个日志超过 256 MiB，请按会话拆分后导入".into());}
