@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Space } from 'antd';
 import * as echarts from 'echarts/core';
-import { LineChart, BarChart } from 'echarts/charts';
+import { LineChart, BarChart, ScatterChart } from 'echarts/charts';
 import {
   GridComponent,
   TooltipComponent,
@@ -15,10 +15,13 @@ import type { Epoch, ResultSet } from '../../contracts';
 import { coloredData, equalExtent, fileColors, directionColors, solutionGroups, solutionColor } from './chart-data';
 import { epochXyz, projectEpochs, positionTooltip, type Xyz } from './positioning-data';
 import { utcAxisLabel } from '../time';
+import { SYMBOL_LIMIT, thinEpochs } from './decimate';
+import { useDetail } from './detail-context';
 
 echarts.use([
   LineChart,
   BarChart,
+  ScatterChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
@@ -26,6 +29,31 @@ echarts.use([
   MarkPointComponent,
   CanvasRenderer,
 ]);
+type ZoomState = { id: string; start: number; end: number; startValue?: number; endValue?: number };
+type ZoomModel = { id: string; getPercentRange: () => number[]; getValueRange: () => number[] };
+/**
+ * Current dataZoom windows. `getOption()` would deep-copy every series' data on each update, which is what made
+ * long charts stall; the component models hold the same windows without copying.
+ */
+function readZooms(chart: echarts.EChartsType): ZoomState[] {
+  const model = (
+    chart as unknown as { getModel?: () => { eachComponent: (t: string, cb: (c: ZoomModel) => void) => void } }
+  ).getModel?.();
+  const fallback = () => (chart.getOption()?.dataZoom ?? []) as ZoomState[];
+  if (!model?.eachComponent) return fallback();
+  try {
+    const zooms: ZoomState[] = [];
+    model.eachComponent('dataZoom', (c) => {
+      const [start, end] = c.getPercentRange();
+      const [startValue, endValue] = c.getValueRange();
+      zooms.push({ id: c.id, start, end, startValue, endValue });
+    });
+    return zooms;
+  } catch {
+    return fallback();
+  }
+}
+
 export const Chart = memo(function Chart({
   option,
   label,
@@ -106,12 +134,7 @@ export const Chart = memo(function Chart({
       if (!callback.current || !ids.some((id) => id === 'time-inside' || id === 'time-slider')) return;
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const zooms = (instance.current?.getOption().dataZoom ?? []) as {
-          id?: string;
-          startValue?: number;
-          endValue?: number;
-        }[];
-        const z = zooms.find((z) => z.id === 'time-inside');
+        const z = instance.current && readZooms(instance.current).find((z) => z.id === 'time-inside');
         if (typeof z?.startValue === 'number' && typeof z?.endValue === 'number')
           callback.current?.(z.startValue, z.endValue);
       }, 180);
@@ -142,13 +165,7 @@ export const Chart = memo(function Chart({
     const next = JSON.stringify(ys.map((y) => [y?.min, y?.max]));
     const originChanged = previousCoordinates.current !== coordinateKey;
     const boundsChanged = originChanged || (limits.current !== undefined && limits.current !== next);
-    const zooms = (instance.current?.getOption()?.dataZoom ?? []) as {
-      id: string;
-      start: number;
-      end: number;
-      startValue?: number;
-      endValue?: number;
-    }[];
+    const zooms = readZooms(chart);
     // Lock inspected intervals to absolute values while new live samples extend the data domain.
     const width = instance.current?.getWidth() ?? 0;
     const locked = zooms.filter(
@@ -293,7 +310,10 @@ function PositioningChartView({
   const [selection, setSelection] = useState<{ identity: string; xyz: Xyz; time: string; name: string } | null>(null);
   const origin = originState?.identity === identity ? originState : null;
   const selected = selection?.identity === identity ? selection : null;
-  const datasets = inputs.map((d) => ({ ...d, epochs: projectEpochs(d.epochs, origin?.xyz ?? null) }));
+  const datasets = useMemo(
+    () => inputs.map((d) => ({ ...d, epochs: projectEpochs(d.epochs, origin?.xyz ?? null) })),
+    [inputs, origin],
+  );
   const coordinateExtent = origin ? undefined : defaultExtent;
   const defaultOrigin = inputs[0]?.referenceXyz;
   const pickable = allowOriginSelection && inputs.some((d) => d.epochs.some((e) => epochXyz(e)));
@@ -313,212 +333,237 @@ function PositioningChartView({
     o.observe(wrapper.current);
     return () => o.disconnect();
   }, []);
-  const option = base();
   const compare = datasets.length > 1;
   const stacked = view === 'stacked';
   const byDirection = view === 'overlay' && !compare && colorBy === 'direction';
-  const series: unknown[] = [];
-  const add = (data: Dataset, di: number, key: 'e' | 'n' | 'u', ai: number) => {
-    if (view === 'overlay' && direction !== 'all' && direction !== key) return;
-    const index = stacked ? ai : 0;
-    const values = (e: Epoch) => (view === 'trajectory' ? [e.e, e.n] : [Date.parse(e.time), e[key]]);
-    const metadata = (value: unknown[]) => [
-      ...value,
-      view === 'trajectory' ? 'EN' : key.toUpperCase(),
-      data.name,
-      data.id,
-    ];
-    const overlay = view === 'overlay';
-    const stride = Math.max(1, Math.ceil(data.epochs.length / Math.max(8, Math.floor(size / 44))));
-    const shape = {
-      type: 'line',
-      xAxisIndex: index,
-      yAxisIndex: index,
-      symbol: overlay ? (['circle', 'diamond', 'triangle'] as const)[ai] : 'circle',
-      symbolSize: overlay
-        ? (_v: unknown, p: { dataIndex: number }) =>
-            p.dataIndex % stride === 0 || p.dataIndex === data.epochs.length - 1 ? 6 : 0
-        : 5,
-      showSymbol: true,
-      connectNulls: false,
-      animation: false,
-      emphasis: { focus: 'series' },
-      lineStyle: { width: overlay ? 1.8 : 1.4, type: overlay ? (['solid', [12, 6], [2, 5]] as const)[ai] : 'solid' },
-      encode: { x: 0, y: 1 },
-      dimensions: ['x', 'y', '原始解状态', 'UTC', '方向', '方案', '方案ID'],
-    };
-    if (compare)
-      series.push({
-        ...shape,
-        id: `${data.id}:${key}`,
-        name: data.name,
-        itemStyle: { color: fileColors[di % fileColors.length] },
-        data: data.epochs.map((e) => metadata([...values(e), e.solution, e.time])),
-      });
-    else if (byDirection)
-      series.push({
-        ...shape,
-        id: `${data.id}:${key}:direction`,
-        name: key.toUpperCase(),
-        lineStyle: { ...shape.lineStyle, color: directionColors[key] },
-        itemStyle: { color: directionColors[key] },
-        data: data.epochs.map((e) => metadata([...values(e), e.solution, e.time])),
-      });
-    else
-      for (const group of solutionGroups) {
-        if (!data.epochs.some((e) => (group.states as readonly string[]).includes(e.solution))) continue;
+  // Built once per data, view or size change; live updates arrive at most once per second.
+  const detail = useDetail();
+  const option = useMemo(() => {
+    const option = base();
+    const series: unknown[] = [];
+    const add = (source: Dataset, di: number, key: 'e' | 'n' | 'u', ai: number) => {
+      if (view === 'overlay' && direction !== 'all' && direction !== key) return;
+      const data = {
+        ...source,
+        epochs: detail === 'all' ? source.epochs : thinEpochs(source.epochs, view === 'trajectory' ? 'en' : key),
+      };
+      const symbols = data.epochs.length <= SYMBOL_LIMIT;
+      const index = stacked ? ai : 0;
+      const values = (e: Epoch) => (view === 'trajectory' ? [e.e, e.n] : [Date.parse(e.time), e[key]]);
+      const metadata = (value: unknown[]) => [
+        ...value,
+        view === 'trajectory' ? 'EN' : key.toUpperCase(),
+        data.name,
+        data.id,
+      ];
+      const overlay = view === 'overlay';
+      const stride = Math.max(1, Math.ceil(data.epochs.length / Math.max(8, Math.floor(size / 44))));
+      const shape = {
+        type: 'line',
+        xAxisIndex: index,
+        yAxisIndex: index,
+        symbol: overlay ? (['circle', 'diamond', 'triangle'] as const)[ai] : 'circle',
+        symbolSize: overlay
+          ? (_v: unknown, p: { dataIndex: number }) =>
+              p.dataIndex % stride === 0 || p.dataIndex === data.epochs.length - 1 ? 6 : 0
+          : 5,
+        showSymbol: symbols,
+        connectNulls: false,
+        animation: false,
+        emphasis: { focus: 'series' },
+        lineStyle: { width: overlay ? 1.8 : 1.4, type: overlay ? (['solid', [12, 6], [2, 5]] as const)[ai] : 'solid' },
+        encode: { x: 0, y: 1 },
+        dimensions: ['x', 'y', '原始解状态', 'UTC', '方向', '方案', '方案ID'],
+      };
+      if (compare)
         series.push({
           ...shape,
-          id: `${data.id}:${key}:${group.name}`,
-          name: group.name,
-          lineStyle: { ...shape.lineStyle, color: group.color },
-          itemStyle: { color: group.color },
-          data: coloredData(data.epochs, group.states, values).map((value) => ({
-            value: metadata(value),
-            itemStyle: { color: solutionColor(value[2] as Epoch['solution']) },
-          })),
+          id: `${data.id}:${key}`,
+          name: data.name,
+          itemStyle: { color: fileColors[di % fileColors.length] },
+          data: data.epochs.map((e) => metadata([...values(e), e.solution, e.time])),
         });
-      }
-  };
-  if (view === 'trajectory') {
-    const extent = equalExtent(
-      datasets.flatMap((d) => d.epochs),
-      Math.max(size - 112, 100),
-      height - 102,
-    );
-    option.xAxis = { ...valueAxis('E / m', 0), min: extent.minX, max: extent.maxX };
-    option.yAxis = { ...valueAxis('N / m', 0), min: extent.minY, max: extent.maxY };
-    option.tooltip = {
-      trigger: 'item',
-      backgroundColor: '#202c3d',
-      borderColor: '#3d506b',
-      textStyle: { color: '#e5ecf5' },
-      formatter: (p: unknown) => positionTooltip(p, true),
+      else if (byDirection)
+        series.push({
+          ...shape,
+          id: `${data.id}:${key}:direction`,
+          name: key.toUpperCase(),
+          lineStyle: { ...shape.lineStyle, color: directionColors[key] },
+          itemStyle: { color: directionColors[key] },
+          data: data.epochs.map((e) => metadata([...values(e), e.solution, e.time])),
+        });
+      else
+        for (const group of solutionGroups) {
+          if (!data.epochs.some((e) => (group.states as readonly string[]).includes(e.solution))) continue;
+          series.push({
+            ...shape,
+            id: `${data.id}:${key}:${group.name}`,
+            name: group.name,
+            lineStyle: { ...shape.lineStyle, color: group.color },
+            itemStyle: { color: group.color },
+            // Per-point colours only matter while symbols are drawn.
+            data: coloredData(data.epochs, group.states, values).map((value) =>
+              symbols
+                ? { value: metadata(value), itemStyle: { color: solutionColor(value[2] as Epoch['solution']) } }
+                : metadata(value),
+            ),
+          });
+        }
     };
-    // Both controllers share the grid: a wheel applies the same factor, while drag uses each axis.
-    option.dataZoom = [
-      { id: 'en-x', type: 'inside', xAxisIndex: 0, filterMode: 'none' },
-      { id: 'en-y', type: 'inside', yAxisIndex: 0, filterMode: 'none' },
-    ];
-    datasets.forEach((d, i) => add(d, i, 'e', 0));
-    datasets.forEach((d) => {
-      const points = d.epochs.filter((e) => Number.isFinite(e.e) && Number.isFinite(e.n));
-      if (!points.length) return;
-      const name = compare
-        ? d.name
-        : solutionGroups.find((g) => (g.states as readonly string[]).includes(points[points.length - 1].solution))
-            ?.name;
-      series.push({
-        id: `${d.id}:endpoints`,
-        type: 'line',
-        name,
-        data: [],
-        showSymbol: false,
-        z: 50,
-        markPoint: {
-          symbol: 'triangle',
-          symbolSize: 8,
-          z: 100,
-          label: { show: false },
-          data: [
-            {
-              name: '起点',
-              coord: [points[0].e, points[0].n],
-              value: [points[0].e, points[0].n, points[0].solution, points[0].time, 'EN', d.name, d.id],
-              itemStyle: { color: '#05603a', borderColor: '#34ff83', borderWidth: 1.5 },
-            },
-            {
-              name: '当前终点',
-              coord: [points[points.length - 1].e, points[points.length - 1].n],
-              symbolRotate: 180,
-              value: [
-                points[points.length - 1].e,
-                points[points.length - 1].n,
-                points[points.length - 1].solution,
-                points[points.length - 1].time,
-                'EN',
-                d.name,
-                d.id,
-              ],
-              itemStyle: { color: '#960c26', borderColor: '#ff5265', borderWidth: 1.5 },
-            },
-          ],
-        },
+    if (view === 'trajectory') {
+      const extent = equalExtent(
+        datasets.flatMap((d) => d.epochs),
+        Math.max(size - 112, 100),
+        height - 102,
+      );
+      option.xAxis = { ...valueAxis('E / m', 0), min: extent.minX, max: extent.maxX };
+      option.yAxis = { ...valueAxis('N / m', 0), min: extent.minY, max: extent.maxY };
+      option.tooltip = {
+        trigger: 'item',
+        backgroundColor: '#202c3d',
+        borderColor: '#3d506b',
+        textStyle: { color: '#e5ecf5' },
+        formatter: (p: unknown) => positionTooltip(p, true),
+      };
+      // Both controllers share the grid: a wheel applies the same factor, while drag uses each axis.
+      option.dataZoom = [
+        { id: 'en-x', type: 'inside', xAxisIndex: 0, filterMode: 'none' },
+        { id: 'en-y', type: 'inside', yAxisIndex: 0, filterMode: 'none' },
+      ];
+      datasets.forEach((d, i) => add(d, i, 'e', 0));
+      datasets.forEach((d) => {
+        const points = d.epochs.filter((e) => Number.isFinite(e.e) && Number.isFinite(e.n));
+        if (!points.length) return;
+        const name = compare
+          ? d.name
+          : solutionGroups.find((g) => (g.states as readonly string[]).includes(points[points.length - 1].solution))
+              ?.name;
+        series.push({
+          id: `${d.id}:endpoints`,
+          type: 'line',
+          name,
+          data: [],
+          showSymbol: false,
+          z: 50,
+          markPoint: {
+            symbol: 'triangle',
+            symbolSize: 8,
+            z: 100,
+            label: { show: false },
+            data: [
+              {
+                name: '起点',
+                coord: [points[0].e, points[0].n],
+                value: [points[0].e, points[0].n, points[0].solution, points[0].time, 'EN', d.name, d.id],
+                itemStyle: { color: '#05603a', borderColor: '#34ff83', borderWidth: 1.5 },
+              },
+              {
+                name: '当前终点',
+                coord: [points[points.length - 1].e, points[points.length - 1].n],
+                symbolRotate: 180,
+                value: [
+                  points[points.length - 1].e,
+                  points[points.length - 1].n,
+                  points[points.length - 1].solution,
+                  points[points.length - 1].time,
+                  'EN',
+                  d.name,
+                  d.id,
+                ],
+                itemStyle: { color: '#960c26', borderColor: '#ff5265', borderWidth: 1.5 },
+              },
+            ],
+          },
+        });
       });
-    });
-  } else {
-    option.tooltip = { ...(option.tooltip as object), formatter: (p: unknown) => positionTooltip(p, false) };
-    const count = stacked ? 3 : 1;
-    const pane = (height - 104 - (count - 1) * 32) / count;
-    option.grid = Array.from({ length: count }, (_, i) => ({
-      left: 68,
-      right: 44,
-      top: 48 + i * (pane + 32),
-      height: pane,
-    }));
-    option.xAxis = Array.from({ length: count }, (_, i) => ({
-      ...timeAxis(i),
-      min: timeDomain?.start,
-      max: timeDomain?.end,
-      axisLabel: { ...timeAxis(i).axisLabel, show: i === count - 1 },
-    }));
-    option.yAxis = Array.from({ length: count }, (_, i) => ({
-      ...valueAxis(stacked ? `${axes[i].toUpperCase()} / m` : 'ENU / m', i),
-      min:
-        bounds[axes[i]]?.[0] ??
-        (stacked
-          ? coordinateExtent?.[i]?.[0]
-          : coordinateExtent
-            ? Math.min(...coordinateExtent.map((e) => e[0]))
-            : undefined),
-      max:
-        bounds[axes[i]]?.[1] ??
-        (stacked
-          ? coordinateExtent?.[i]?.[1]
-          : coordinateExtent
-            ? Math.max(...coordinateExtent.map((e) => e[1]))
-            : undefined),
-    }));
-    option.axisPointer = { link: [{ xAxisIndex: 'all' }] };
-    option.dataZoom = [
-      {
-        id: 'time-inside',
-        type: 'inside',
-        xAxisIndex: Array.from({ length: count }, (_, i) => i),
-        filterMode: 'none',
-        zoomOnMouseWheel: 'shift',
-        moveOnMouseMove: 'shift',
-      },
-      {
-        id: 'time-slider',
-        type: 'slider',
-        xAxisIndex: Array.from({ length: count }, (_, i) => i),
-        height: 18,
-        bottom: 6,
-      },
-      ...Array.from({ length: count }, (_, i) => ({
-        id: `coordinate-${i}`,
-        type: 'inside',
-        yAxisIndex: i,
-        filterMode: 'none',
-        zoomOnMouseWheel: true,
-        moveOnMouseMove: true,
-      })),
-      ...Array.from({ length: count }, (_, i) => ({
-        id: `coordinate-slider-${i}`,
-        type: 'slider',
-        yAxisIndex: i,
-        orient: 'vertical',
-        right: 8,
+    } else {
+      option.tooltip = { ...(option.tooltip as object), formatter: (p: unknown) => positionTooltip(p, false) };
+      const count = stacked ? 3 : 1;
+      const pane = (height - 104 - (count - 1) * 32) / count;
+      option.grid = Array.from({ length: count }, (_, i) => ({
+        left: 68,
+        right: 44,
         top: 48 + i * (pane + 32),
         height: pane,
-        width: 12,
-        showDetail: false,
-      })),
-    ];
-    datasets.forEach((d, i) => axes.forEach((k, a) => add(d, i, k, a)));
-  }
-  option.series = series;
+      }));
+      option.xAxis = Array.from({ length: count }, (_, i) => ({
+        ...timeAxis(i),
+        min: timeDomain?.start,
+        max: timeDomain?.end,
+        axisLabel: { ...timeAxis(i).axisLabel, show: i === count - 1 },
+      }));
+      option.yAxis = Array.from({ length: count }, (_, i) => ({
+        ...valueAxis(stacked ? `${axes[i].toUpperCase()} / m` : 'ENU / m', i),
+        min:
+          bounds[axes[i]]?.[0] ??
+          (stacked
+            ? coordinateExtent?.[i]?.[0]
+            : coordinateExtent
+              ? Math.min(...coordinateExtent.map((e) => e[0]))
+              : undefined),
+        max:
+          bounds[axes[i]]?.[1] ??
+          (stacked
+            ? coordinateExtent?.[i]?.[1]
+            : coordinateExtent
+              ? Math.max(...coordinateExtent.map((e) => e[1]))
+              : undefined),
+      }));
+      option.axisPointer = { link: [{ xAxisIndex: 'all' }] };
+      option.dataZoom = [
+        {
+          id: 'time-inside',
+          type: 'inside',
+          xAxisIndex: Array.from({ length: count }, (_, i) => i),
+          filterMode: 'none',
+          zoomOnMouseWheel: 'shift',
+          moveOnMouseMove: 'shift',
+        },
+        {
+          id: 'time-slider',
+          type: 'slider',
+          xAxisIndex: Array.from({ length: count }, (_, i) => i),
+          height: 18,
+          bottom: 6,
+        },
+        ...Array.from({ length: count }, (_, i) => ({
+          id: `coordinate-${i}`,
+          type: 'inside',
+          yAxisIndex: i,
+          filterMode: 'none',
+          zoomOnMouseWheel: true,
+          moveOnMouseMove: true,
+        })),
+        ...Array.from({ length: count }, (_, i) => ({
+          id: `coordinate-slider-${i}`,
+          type: 'slider',
+          yAxisIndex: i,
+          orient: 'vertical',
+          right: 8,
+          top: 48 + i * (pane + 32),
+          height: pane,
+          width: 12,
+          showDetail: false,
+        })),
+      ];
+      datasets.forEach((d, i) => axes.forEach((k, a) => add(d, i, k, a)));
+    }
+    option.series = series;
+    return option;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    datasets,
+    view,
+    colorBy,
+    direction,
+    size,
+    height,
+    bounds,
+    timeDomain?.start,
+    timeDomain?.end,
+    coordinateExtent,
+    detail,
+  ]);
   return (
     <div ref={wrapper} className="positioning-chart">
       <div className="chart-toolbar">

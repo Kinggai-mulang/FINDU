@@ -11,6 +11,8 @@ export default defineConfig({
   clearScreen: false,
   test: { include: ['src/**/*.test.ts', 'tests/**/*.test.ts'] },
   build: {
+    // FINDU_PROFILE_BUILD=1 keeps function names readable in CPU profiles (tests/perf-desktop.mjs --profile 1).
+    minify: process.env.FINDU_PROFILE_BUILD !== '1',
     chunkSizeWarningLimit: 1100,
     rollupOptions: {
       output: {

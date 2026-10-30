@@ -68,16 +68,33 @@ export const fieldInfo: Record<string, { name: string; unit: string; scale: numb
 };
 
 /** Preserve every point and explicit null; insert a break for absent epochs, never bridge a gap. */
+const timeCache = new WeakMap<RealtimeMetrics[], { times: number[]; interval: number }>();
+/**
+ * Parsed UTC milliseconds and the median row spacing of one diagnostics array. Charts, state ribbons and windows
+ * all need them; parsing 170 000 timestamps and sorting their spacings once per array instead of once per chart
+ * field is what keeps long post-processing results responsive.
+ */
+export function rowTimes(rows: RealtimeMetrics[]) {
+  let hit = timeCache.get(rows);
+  if (!hit) {
+    const times = rows.map((m) => Date.parse(m.time));
+    const steps = times
+      .slice(1)
+      .map((t, i) => t - times[i])
+      .filter((t) => t > 0);
+    hit = { times, interval: median(steps) ?? 1000 };
+    timeCache.set(rows, hit);
+  }
+  return hit;
+}
+
 export function chartSamples(rows: RealtimeMetrics[], key: string, scale = 1, log = false, display?: [number, number]) {
-  const steps = rows
-    .slice(1)
-    .map((r, i) => Date.parse(r.time) - Date.parse(rows[i].time))
-    .filter((t) => t > 0);
-  const interval = median(steps) ?? 1000;
+  const { times, interval } = rowTimes(rows);
   const data: (number | null)[][] = [];
   let previous: number | undefined;
-  for (const m of rows) {
-    const t = Date.parse(m.time);
+  for (let i = 0; i < rows.length; i++) {
+    const m = rows[i];
+    const t = times[i];
     if (!Number.isFinite(t)) continue;
     if (previous !== undefined && t - previous > interval * 1.5)
       data.push([previous + Math.min(interval, (t - previous) / 2), null, null, 0]);
@@ -237,7 +254,17 @@ export function atmosphereWindowStats(results: ResultSet[], common = false) {
 }
 
 /** Derived display fields keep their source epoch; Q and VQ have independent validity. */
+const geometryCache = new WeakMap<object, { epochs: unknown; diagnostics: RealtimeMetrics[] }>();
+/** Derived baseline, velocity and Up columns; cached per diagnostics array because it copies every row. */
 export function geometryDiagnostics(r: ResultSet): ResultSet {
+  const source = r.diagnostics ?? [];
+  const hit = geometryCache.get(source);
+  if (hit && hit.epochs === r.epochs) return { ...r, diagnostics: hit.diagnostics };
+  const derived = deriveGeometry(r);
+  geometryCache.set(source, { epochs: r.epochs, diagnostics: derived.diagnostics ?? [] });
+  return derived;
+}
+function deriveGeometry(r: ResultSet): ResultSet {
   const positions = new Map(
     r.epochs.map((e) => [
       Math.round(
@@ -280,8 +307,10 @@ export function geometryDiagnostics(r: ResultSet): ResultSet {
 }
 
 export function timeRows(r: ResultSet, window: Window): RealtimeMetrics[] {
-  return (r.diagnostics ?? []).filter((m) => {
-    const t = Date.parse(m.time);
+  const rows = r.diagnostics ?? [];
+  const { times } = rowTimes(rows);
+  return rows.filter((_, i) => {
+    const t = times[i];
     return (window.start === undefined || t >= window.start) && (window.end === undefined || t <= window.end);
   });
 }
@@ -298,17 +327,14 @@ export function diagnosticInterval(r: ResultSet) {
 }
 
 export function stateSegments(rows: RealtimeMetrics[], key: 'Q' | 'AC') {
-  const steps = rows
-    .slice(1)
-    .map((m, i) => Date.parse(m.time) - Date.parse(rows[i].time))
-    .filter((v) => v > 0);
-  const interval = median(steps) ?? 1000;
+  const { times, interval } = rowTimes(rows);
   const segments: { start: number; end: number; value: number; solution: RealtimeMetrics['solution'] }[] = [];
   let previous: number | undefined;
   let current: (typeof segments)[number] | undefined;
-  for (const m of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const m = rows[i];
     const raw = numeric(m, key);
-    const at = Date.parse(m.time);
+    const at = times[i];
     if (raw === null || !Number.isFinite(at)) {
       current = undefined;
       continue;

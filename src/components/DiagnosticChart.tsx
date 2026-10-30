@@ -1,8 +1,10 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { Chart } from './Charts';
 import { NoData } from './common';
 import { fileColors } from './chart-data';
 import { chartSamples } from '../diagnostics';
+import { DISPLAY_COLUMNS, decimateIndices } from './decimate';
+import { useDetail } from './detail-context';
 import { utcAxisLabel } from '../time';
 import type { RealtimeMetrics } from '../../contracts';
 
@@ -45,42 +47,83 @@ export const DiagnosticChart = memo(
     onInspect,
     height = 270,
   }: Props) {
-    const has = datasets.some((d) =>
-      d.diagnostics?.some((m) => fields.some((k) => diagnosticValue(m[k], valueScale, logarithmic) !== null)),
-    );
-    if (!has) return <NoData text="该日志未提供这些诊断值，保留未知" />;
+    const detail = useDetail();
     const bounds = logarithmic ? ([0.0001, 1] as [number, number]) : displayBounds;
-    const series = datasets.flatMap((d, i) =>
-      fields.map((k, j) => {
-        const data = chartSamples(d.diagnostics ?? [], k, valueScale, logarithmic, bounds);
-        const color =
-          datasets.length > 1
-            ? (d.color ?? fileColors[i % fileColors.length])
-            : fields.length === 1
-              ? (d.color ?? fileColors[0])
-              : fileColors[j % fileColors.length];
-        return {
-          id: `${d.id}:${k}`,
-          name: datasets.length > 1 ? `${d.name} · ${labels[k] ?? k}` : (labels[k] ?? k),
-          type: 'line' as const,
-          symbol: (item: unknown) => (Array.isArray(item) && item[3] ? 'triangle' : 'circle'),
-          symbolRotate: (item: unknown) => (Array.isArray(item) && item[3] === -1 ? 180 : 0),
-          symbolSize: (item: unknown) => (Array.isArray(item) && item[3] ? 8 : 4),
-          showSymbol: !!bounds || data.length < 3,
-          connectNulls: false,
-          step: states ? ('end' as const) : undefined,
-          encode: { x: 0, y: 1 },
-          lineStyle: {
-            width: 1.7,
-            color,
-            type: j % 4 === 3 ? [8, 3, 2, 3] : (['solid', 'dashed', 'dotted'] as const)[j % 4],
-          },
-          itemStyle: { color },
-          data: data.map((v) => ({ value: v, symbolSize: v[3] ? 8 : data.length < 3 ? 4 : 0 })),
-        };
-      }),
-    );
-    const outside = series.reduce((n, s) => n + s.data.filter((p) => p.value[3]).length, 0);
+    const boundsKey = bounds?.join(',');
+    const { series, outside, has } = useMemo(() => {
+      const has = datasets.some((d) =>
+        d.diagnostics?.some((m) => fields.some((k) => diagnosticValue(m[k], valueScale, logarithmic) !== null)),
+      );
+      let outside = 0;
+      const series = datasets.flatMap((d, i) =>
+        fields.flatMap((k, j) => {
+          const all = chartSamples(d.diagnostics ?? [], k, valueScale, logarithmic, bounds);
+          // Gap markers (null) and out-of-window points always survive thinning.
+          const picked =
+            detail === 'all'
+              ? undefined
+              : decimateIndices(
+                  all.map((v) => v[0] as number),
+                  all.map((v) => v[1]),
+                  DISPLAY_COLUMNS,
+                  (index) => all[index][1] === null || all[index][3] !== 0,
+                );
+          const data = !picked || picked.length === all.length ? all : picked.map((index) => all[index]);
+          const overflow = all.filter((v) => v[3]);
+          outside += overflow.length;
+          const color =
+            datasets.length > 1
+              ? (d.color ?? fileColors[i % fileColors.length])
+              : fields.length === 1
+                ? (d.color ?? fileColors[0])
+                : fileColors[j % fileColors.length];
+          const name = datasets.length > 1 ? `${d.name} · ${labels[k] ?? k}` : (labels[k] ?? k);
+          const line = {
+            id: `${d.id}:${k}`,
+            name,
+            type: 'line' as const,
+            showSymbol: data.length < 3,
+            symbolSize: 4,
+            connectNulls: false,
+            step: states ? ('end' as const) : undefined,
+            encode: { x: 0, y: 1 },
+            lineStyle: {
+              width: 1.7,
+              color,
+              type: j % 4 === 3 ? [8, 3, 2, 3] : (['solid', 'dashed', 'dotted'] as const)[j % 4],
+            },
+            itemStyle: { color },
+            data,
+          };
+          if (!overflow.length) return [line];
+          // Points outside the reading window sit on its edge as triangles; tooltips keep the raw value.
+          const markers = {
+            id: `${d.id}:${k}:outside`,
+            name,
+            type: 'scatter' as const,
+            symbol: 'triangle',
+            symbolSize: 8,
+            itemStyle: { color },
+            encode: { x: 0, y: 1 },
+            data: overflow.map((v) => ({ value: v, symbolRotate: v[3] === -1 ? 180 : 0 })),
+          };
+          return [line, markers];
+        }),
+      );
+      return { series, outside, has };
+      // Keys stand in for bounds, states and labels, which callers often pass as fresh literals.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      datasets,
+      fields.join('|'),
+      valueScale,
+      logarithmic,
+      boundsKey,
+      JSON.stringify(states),
+      JSON.stringify(labels),
+      detail,
+    ]);
+    if (!has) return <NoData text="该日志未提供这些诊断值，保留未知" />;
     return (
       <>
         <Chart
@@ -111,11 +154,13 @@ export const DiagnosticChart = memo(
                   color: string;
                 }[];
                 const time = rows[0]?.value?.[0];
+                const seen = new Set<string>();
                 return (
                   (typeof time === 'number'
                     ? new Date(time).toISOString().replace('T', ' ').slice(0, 23) + ' UTC'
                     : '') +
                   rows
+                    .filter((p) => !seen.has(p.seriesName) && !!seen.add(p.seriesName))
                     .map((p) => {
                       const raw = p.value?.[2];
                       const value = typeof raw === 'number' ? raw * (logarithmic ? 1 : valueScale) : null;

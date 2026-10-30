@@ -16,14 +16,26 @@ export const metricKey = (m: RealtimeMetrics) =>
   typeof m.Week === 'number' && typeof m.TOW === 'number'
     ? Math.round((m.Week * 604800 + m.TOW) * 1000)
     : Date.parse(m.time);
-export const within = (time: string, w: Window) => {
-  const t = Date.parse(time);
+export const within = (time: string | number, w: Window) => {
+  const t = typeof time === 'number' ? time : Date.parse(time);
   return Number.isFinite(t) && (w.start === undefined || t >= w.start) && (w.end === undefined || t <= w.end);
 };
+const windowTimes = new WeakMap<object[], number[]>();
+/** Rows inside a UTC window. Times are parsed once per array, and an unfiltered window keeps the array identity
+ * so downstream memos (thinning, charts) stay valid. */
+export function inWindow<T extends { time: string }>(rows: T[], w: Window): T[] {
+  if (w.start === undefined && w.end === undefined) return rows;
+  let times = windowTimes.get(rows);
+  if (!times) windowTimes.set(rows, (times = rows.map((r) => Date.parse(r.time))));
+  const t = times;
+  const kept = rows.filter((_, i) => within(t[i], w));
+  return kept.length === rows.length ? rows : kept;
+}
 export const median = (v: number[]) => quantile(v, 0.5);
 export function quantile(v: number[], p: number): number | null {
   if (!v.length) return null;
-  const a = [...v].sort((a, b) => a - b),
+  // Typed-array sort is numeric and native, several times faster than a comparator on 170 000 values.
+  const a = Float64Array.from(v).sort(),
     i = (a.length - 1) * p,
     k = Math.floor(i);
   return a[k] + (a[Math.min(k + 1, a.length - 1)] - a[k]) * (i - k);
@@ -49,20 +61,31 @@ export function validReference(text: string): [number, number, number] | null {
     .map(Number);
   return a.length === 3 && a.every(Number.isFinite) && Math.hypot(...a) > 1e6 ? (a as [number, number, number]) : null;
 }
-export function enu(xyz: number[], origin: number[]): [number, number, number] {
-  const [x, y, z] = origin,
-    lon = Math.atan2(y, x),
+// Rotation of the last origin; analyses project every epoch onto one origin, so the geodetic latitude
+// iteration runs once per origin instead of once per epoch.
+let frame: { x: number; y: number; z: number; sLat: number; cLat: number; sLon: number; cLon: number } | undefined;
+function rotation(origin: number[]) {
+  const [x, y, z] = origin;
+  if (frame && frame.x === x && frame.y === y && frame.z === z) return frame;
+  const lon = Math.atan2(y, x),
     p = Math.hypot(x, y);
   let lat = Math.atan2(z, p * (1 - 0.00669437999014));
   for (let i = 0; i < 10; i++) {
     const r = 6378137 / Math.sqrt(1 - 0.00669437999014 * Math.sin(lat) ** 2);
     lat = Math.atan2(z + 0.00669437999014 * r * Math.sin(lat), p);
   }
-  const [dx, dy, dz] = xyz.map((v, i) => v - origin[i]);
+  frame = { x, y, z, sLat: Math.sin(lat), cLat: Math.cos(lat), sLon: Math.sin(lon), cLon: Math.cos(lon) };
+  return frame;
+}
+export function enu(xyz: number[], origin: number[]): [number, number, number] {
+  const { sLat, cLat, sLon, cLon } = rotation(origin);
+  const dx = xyz[0] - origin[0],
+    dy = xyz[1] - origin[1],
+    dz = xyz[2] - origin[2];
   return [
-    -Math.sin(lon) * dx + Math.cos(lon) * dy,
-    -Math.sin(lat) * Math.cos(lon) * dx - Math.sin(lat) * Math.sin(lon) * dy + Math.cos(lat) * dz,
-    Math.cos(lat) * Math.cos(lon) * dx + Math.cos(lat) * Math.sin(lon) * dy + Math.sin(lat) * dz,
+    -sLon * dx + cLon * dy,
+    -sLat * cLon * dx - sLat * sLon * dy + cLat * dz,
+    cLat * cLon * dx + cLat * sLon * dy + sLat * dz,
   ];
 }
 export function sharedResults(
@@ -198,6 +221,15 @@ export function convergence(
   }
   return null;
 }
+// Zooming changes only the window; the reprojection of every epoch is reused until the inputs change.
+let sharedCache: { inputs: unknown[]; full: ResultSet[] } | undefined;
+function cachedShared(results: ResultSet[], baselineId: string, reference: [number, number, number] | null) {
+  const inputs = [baselineId, reference?.join(','), ...results];
+  if (sharedCache && sharedCache.inputs.length === inputs.length && sharedCache.inputs.every((v, i) => v === inputs[i]))
+    return sharedCache.full;
+  sharedCache = { inputs, full: sharedResults(results, baselineId, reference) };
+  return sharedCache.full;
+}
 export function buildAnalysis(
   results: ResultSet[],
   options: {
@@ -211,7 +243,7 @@ export function buildAnalysis(
     hold?: number;
   },
 ) {
-  const full = sharedResults(results, options.baselineId, options.reference);
+  const full = cachedShared(results, options.baselineId, options.reference);
   const extent = ['e', 'n', 'u'].map((k) => {
     let lo = Infinity,
       hi = -Infinity;
@@ -226,8 +258,8 @@ export function buildAnalysis(
   });
   const projected = full.map((r) => ({
     ...r,
-    epochs: r.epochs.filter((e) => within(e.time, options.window)),
-    diagnostics: (r.diagnostics ?? []).filter((m) => within(m.time, options.window)),
+    epochs: inWindow(r.epochs, options.window),
+    diagnostics: inWindow(r.diagnostics ?? [], options.window),
   }));
   const sets = projected.map(
     (r) => new Set(r.epochs.filter((e) => (options.cohort === 'common-fixed' ? fixed(e) : true)).map(keyOf)),

@@ -16,6 +16,7 @@ import {
   Tabs,
   Tag,
   Segmented,
+  Tooltip,
 } from 'antd';
 import { DownloadOutlined, FolderOpenOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ResultEntry } from '../../contracts';
@@ -32,6 +33,8 @@ import { exportText, exportPng, isDesktop, pickPath } from '../services/files';
 import { useEngine, workbenchEngine } from '../services/native-engine';
 import { readStored, writeStored } from '../services/storage';
 import { CompareChart } from '../components/Charts';
+import { isThinned } from '../components/decimate';
+import { DetailContext, type Detail } from '../components/detail-context';
 import { DiagnosticChart } from '../components/DiagnosticChart';
 import { ProductTimeline } from '../components/ProductTimeline';
 import { Metric, NoData, PageHeading, Panel } from '../components/common';
@@ -81,6 +84,7 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
   const [end, setEnd] = useState('');
   const [preferences, setPreferences] = useState<Record<string, Settings>>(() => readStored('analysisPreferences', {}));
   const [modeChoice, setModeChoice] = useState('PPP');
+  const [detail, setDetail] = useState<Detail>('auto');
   const [inspectAt, setInspectAt] = useState<number | null>(null);
   const [positionSection, setPositionSection] = useState('position');
   const [observationSection, setObservationSection] = useState('support');
@@ -114,6 +118,8 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
   const reference = settings.useReference ? validReference(settings.referenceText) : null;
   const referenceLabel = reference ? '独立参考误差' : '共用原点相对位置';
   const live = active.some((r) => r.isLiveCache);
+  // Realtime buffers (≤ 3600 epochs) are always drawn in full; the switch appears only for long results.
+  const long = active.some((r) => isThinned(r.epochs.length) || isThinned(r.diagnostics?.length ?? 0));
   const following = live && !start && !end;
   const bounds = useMemo(
     () =>
@@ -895,165 +901,181 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
             ? '定位支持跨模式对比；专属诊断按算法分组，UD 与 DD 残差分别解读。'
             : '依据 Log=4 文件头识别模式 · 专属诊断沿用当前时间窗与样本集合'}
         </span>
+        {long && (
+          <Tooltip title="长序列按像素列保留首、末、最高、最低点，尖峰与解状态变化不会丢失；放大到 6000 点以内自动显示全部历元。统计、事件与导出始终使用全部历元。">
+            <Segmented
+              size="small"
+              aria-label="图表显示细节"
+              value={detail}
+              onChange={(v) => setDetail(v as Detail)}
+              options={[
+                { value: 'auto', label: '自动抽稀' },
+                { value: 'all', label: '全部历元' },
+              ]}
+            />
+          </Tooltip>
+        )}
         <Button size="small" disabled={!diagnosticResults.length} onClick={exportEpochs}>
           导出原始诊断 CSV
         </Button>
       </div>
-      <Tabs
-        key={revision}
-        activeKey={tab}
-        onChange={setTab}
-        items={[
-          { key: 'overview', label: '结果总览', children: overview },
-          {
-            key: 'position',
-            label: '定位与连续性',
-            children: (
-              <>
-                <div className="diagnostic-subnav">
-                  <Segmented
-                    aria-label="定位分析分区"
-                    value={positionSection}
-                    onChange={setPositionSection}
-                    options={[
-                      { value: 'position', label: '位置' },
-                      { value: 'continuity', label: '连续性' },
-                      ...(diagnosticMode ? [{ value: 'velocity', label: '独立测速' }] : []),
-                    ]}
-                  />
-                </div>
-                <div style={{ display: positionSection === 'position' ? undefined : 'none' }}>{position}</div>
-                {positionSection === 'continuity' && continuity}
-                {positionSection === 'velocity' && <VelocityDiagnostics {...diagnosticProps} />}
-              </>
-            ),
-          },
-          ...(diagnosticMode
-            ? [
-                {
-                  key: 'satellites',
-                  label: diagnosticMode === 'RTK' ? '共视与差分' : '观测与质控',
-                  destroyOnHidden: true,
-                  children: (
-                    <>
-                      <div className="diagnostic-subnav">
-                        <Segmented
-                          aria-label="观测诊断分区"
-                          value={observationSection}
-                          onChange={setObservationSection}
-                          options={[
-                            { value: 'support', label: '观测支持与质控' },
-                            { value: 'residuals', label: '后验残差' },
-                          ]}
-                        />
-                      </div>
-                      {observationSection === 'support' ? (
-                        <ObservationDiagnostics {...diagnosticProps} />
-                      ) : (
-                        <>
-                          <div className="diagnostic-intro">
-                            <Tag>{diagnosticMode === 'RTK' ? '双差 DD 行' : '非差 UD 行'}</Tag>
-                            <p>码残差使用 m，相位残差使用 mm。不同观测模型的残差不直接用于精度排名。</p>
-                          </div>
-                          <div className="diagnostic-grid">
-                            {diagnosticPanel('伪距后验 RMS / m', ['FPRMS'], 'm')}
-                            {diagnosticPanel('相位后验 RMS / mm', ['FLRMS'], 'mm', 1000)}
-                            {diagnosticPanel('标准化伪距残差', ['PNRMS'])}
-                            {diagnosticPanel('标准化载波残差', ['LNRMS'])}
-                          </div>
-                        </>
-                      )}
-                    </>
-                  ),
-                },
-                {
-                  key: 'ambiguity',
-                  destroyOnHidden: true,
-                  label: '模糊度与固定',
-                  children: <AmbiguityDiagnostics {...diagnosticProps} />,
-                },
-                diagnosticMode === 'PPP'
-                  ? {
-                      key: 'atmosphere',
-                      destroyOnHidden: true,
-                      label: '大气与状态耦合',
-                      children: <AtmosphereDiagnostics {...diagnosticProps} />,
-                    }
-                  : {
-                      key: 'base',
-                      destroyOnHidden: true,
-                      label: '基站与同步',
-                      children: <BaseDiagnostics {...diagnosticProps} />,
-                    },
-              ]
-            : []),
-          ...(diagnosticMode === 'PPP'
-            ? [
-                {
-                  key: 'products',
-                  destroyOnHidden: true,
-                  label: '产品覆盖',
-                  children: (
-                    <>
-                      <Alert
-                        showIcon
-                        type="info"
-                        title="产品快照使用本机接收 UTC，独立于定位时间窗"
-                        description="时效有效不等于实际采用或 AR 资格；录制回放的接收时间与观测时间可能不同。"
-                      />
-                      <Panel title="产品时效快照">
-                        <ProductTimeline results={active.filter((r) => solverMode(r) === 'PPP')} />
-                      </Panel>
-                      <Panel
-                        title="产品数量与 age"
-                        extra={
-                          <Select
-                            aria-label="对比产品组件"
-                            value={productComponent}
-                            onChange={setProductComponent}
-                            options={['orbit', 'clock', 'code', 'phase'].map((value, i) => ({
-                              value,
-                              label: ['轨道', '钟差', '码偏差', '相位偏差'][i],
-                            }))}
-                          />
-                        }
-                      >
-                        <div className="diagnostic-grid">
-                          <DiagnosticChart
-                            datasets={active
-                              .filter((r) => solverMode(r) === 'PPP')
-                              .map((r) => ({ ...r, diagnostics: r.productHistory }))}
-                            fields={[productComponent]}
-                            label="产品时效有效卫星数"
-                            unit="颗"
-                          />
-                          <DiagnosticChart
-                            datasets={active
-                              .filter((r) => solverMode(r) === 'PPP')
-                              .map((r) => ({ ...r, diagnostics: r.productHistory }))}
-                            fields={[productComponent + 'Age']}
-                            label="最新产品 age"
-                            unit="s"
-                          />
-                        </div>
-                      </Panel>
-                    </>
-                  ),
-                },
-              ]
-            : diagnosticMode === 'RTK'
+      <DetailContext.Provider value={detail}>
+        <Tabs
+          key={revision}
+          activeKey={tab}
+          onChange={setTab}
+          items={[
+            { key: 'overview', label: '结果总览', children: overview },
+            {
+              key: 'position',
+              label: '定位与连续性',
+              children: (
+                <>
+                  <div className="diagnostic-subnav">
+                    <Segmented
+                      aria-label="定位分析分区"
+                      value={positionSection}
+                      onChange={setPositionSection}
+                      options={[
+                        { value: 'position', label: '位置' },
+                        { value: 'continuity', label: '连续性' },
+                        ...(diagnosticMode ? [{ value: 'velocity', label: '独立测速' }] : []),
+                      ]}
+                    />
+                  </div>
+                  <div style={{ display: positionSection === 'position' ? undefined : 'none' }}>{position}</div>
+                  {positionSection === 'continuity' && continuity}
+                  {positionSection === 'velocity' && <VelocityDiagnostics {...diagnosticProps} />}
+                </>
+              ),
+            },
+            ...(diagnosticMode
               ? [
                   {
-                    key: 'sources',
+                    key: 'satellites',
+                    label: diagnosticMode === 'RTK' ? '共视与差分' : '观测与质控',
                     destroyOnHidden: true,
-                    label: '数据源与同步',
-                    children: <DataSources results={active.filter((r) => solverMode(r) === 'RTK')} />,
+                    children: (
+                      <>
+                        <div className="diagnostic-subnav">
+                          <Segmented
+                            aria-label="观测诊断分区"
+                            value={observationSection}
+                            onChange={setObservationSection}
+                            options={[
+                              { value: 'support', label: '观测支持与质控' },
+                              { value: 'residuals', label: '后验残差' },
+                            ]}
+                          />
+                        </div>
+                        {observationSection === 'support' ? (
+                          <ObservationDiagnostics {...diagnosticProps} />
+                        ) : (
+                          <>
+                            <div className="diagnostic-intro">
+                              <Tag>{diagnosticMode === 'RTK' ? '双差 DD 行' : '非差 UD 行'}</Tag>
+                              <p>码残差使用 m，相位残差使用 mm。不同观测模型的残差不直接用于精度排名。</p>
+                            </div>
+                            <div className="diagnostic-grid">
+                              {diagnosticPanel('伪距后验 RMS / m', ['FPRMS'], 'm')}
+                              {diagnosticPanel('相位后验 RMS / mm', ['FLRMS'], 'mm', 1000)}
+                              {diagnosticPanel('标准化伪距残差', ['PNRMS'])}
+                              {diagnosticPanel('标准化载波残差', ['LNRMS'])}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ),
                   },
+                  {
+                    key: 'ambiguity',
+                    destroyOnHidden: true,
+                    label: '模糊度与固定',
+                    children: <AmbiguityDiagnostics {...diagnosticProps} />,
+                  },
+                  diagnosticMode === 'PPP'
+                    ? {
+                        key: 'atmosphere',
+                        destroyOnHidden: true,
+                        label: '大气与状态耦合',
+                        children: <AtmosphereDiagnostics {...diagnosticProps} />,
+                      }
+                    : {
+                        key: 'base',
+                        destroyOnHidden: true,
+                        label: '基站与同步',
+                        children: <BaseDiagnostics {...diagnosticProps} />,
+                      },
                 ]
               : []),
-          { key: 'provenance', label: '来源与配置', children: provenance },
-        ]}
-      />
+            ...(diagnosticMode === 'PPP'
+              ? [
+                  {
+                    key: 'products',
+                    destroyOnHidden: true,
+                    label: '产品覆盖',
+                    children: (
+                      <>
+                        <Alert
+                          showIcon
+                          type="info"
+                          title="产品快照使用本机接收 UTC，独立于定位时间窗"
+                          description="时效有效不等于实际采用或 AR 资格；录制回放的接收时间与观测时间可能不同。"
+                        />
+                        <Panel title="产品时效快照">
+                          <ProductTimeline results={active.filter((r) => solverMode(r) === 'PPP')} />
+                        </Panel>
+                        <Panel
+                          title="产品数量与 age"
+                          extra={
+                            <Select
+                              aria-label="对比产品组件"
+                              value={productComponent}
+                              onChange={setProductComponent}
+                              options={['orbit', 'clock', 'code', 'phase'].map((value, i) => ({
+                                value,
+                                label: ['轨道', '钟差', '码偏差', '相位偏差'][i],
+                              }))}
+                            />
+                          }
+                        >
+                          <div className="diagnostic-grid">
+                            <DiagnosticChart
+                              datasets={active
+                                .filter((r) => solverMode(r) === 'PPP')
+                                .map((r) => ({ ...r, diagnostics: r.productHistory }))}
+                              fields={[productComponent]}
+                              label="产品时效有效卫星数"
+                              unit="颗"
+                            />
+                            <DiagnosticChart
+                              datasets={active
+                                .filter((r) => solverMode(r) === 'PPP')
+                                .map((r) => ({ ...r, diagnostics: r.productHistory }))}
+                              fields={[productComponent + 'Age']}
+                              label="最新产品 age"
+                              unit="s"
+                            />
+                          </div>
+                        </Panel>
+                      </>
+                    ),
+                  },
+                ]
+              : diagnosticMode === 'RTK'
+                ? [
+                    {
+                      key: 'sources',
+                      destroyOnHidden: true,
+                      label: '数据源与同步',
+                      children: <DataSources results={active.filter((r) => solverMode(r) === 'RTK')} />,
+                    },
+                  ]
+                : []),
+            { key: 'provenance', label: '来源与配置', children: provenance },
+          ]}
+        />
+      </DetailContext.Provider>
       {inspectAt !== null && (
         <EpochInspector
           results={diagnosticResults.map(geometryDiagnostics)}

@@ -64,11 +64,33 @@ async function measure(run) {
     window.__longObserver.observe({ type: 'longtask' });
   });
   const before = await metrics();
+  if (args.profile) {
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.start');
+  }
   const started = Date.now();
   const extra = await run();
   const elapsed = (Date.now() - started) / 1000;
   const after = await metrics();
   const long = await page.evaluate(() => window.__longTasks);
+  if (args.profile) {
+    // `--profile 1` adds the functions with the most self time, enough to locate a regression.
+    const { profile } = await cdp.send('Profiler.stop');
+    const self = new Map();
+    const gaps = profile.timeDeltas;
+    profile.samples.forEach((id, i) => self.set(id, (self.get(id) ?? 0) + (gaps[i] ?? 0)));
+    const totals = new Map();
+    for (const node of profile.nodes) {
+      const f = node.callFrame;
+      const name = `${f.functionName || '(anonymous)'} ${f.url.split('/').pop()}:${f.lineNumber + 1}`;
+      totals.set(name, (totals.get(name) ?? 0) + (self.get(node.id) ?? 0) / 1000);
+    }
+    extra.topSelfMs = [...totals]
+      .filter(([n]) => !n.startsWith('(idle)') && !n.startsWith('(program)'))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([n, ms]) => `${Math.round(ms)} ${n}`);
+  }
   return {
     elapsedSec: +elapsed.toFixed(2),
     mainThreadBusySec: +(after.TaskDuration - before.TaskDuration).toFixed(2),
@@ -394,15 +416,17 @@ try {
     await canvas.waitFor();
     const box = await canvas.boundingBox();
     report.scenarios['analysis-zoom'] = await measure(async () => {
-      // Shift + wheel zooms the shared time axis, which is the common inspection gesture.
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 3);
-      await page.keyboard.down('Shift');
-      for (let i = 0; i < 6; i++) {
-        await page.mouse.wheel(0, -300);
-        await page.waitForTimeout(150);
-      }
-      await page.keyboard.up('Shift');
-      return settle();
+      // Drag the time slider's left handle to 62 %: the analysis re-runs on the new window and the charts refit.
+      // (Shift + wheel is turned into horizontal scrolling by Chromium automation and never reaches ECharts.)
+      const range = () => page.locator('[aria-label="分析时间跨度"]').first().innerText();
+      const old = await range();
+      const y = box.y + box.height - 11;
+      await page.mouse.move(box.x + box.width * 0.0617, y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * 0.62, y, { steps: 15 });
+      await page.mouse.up();
+      await page.waitForFunction((o) => document.querySelector('[aria-label="分析时间跨度"]')?.textContent !== o, old);
+      return { ...(await settle()), windowAfterZoom: await range() };
     });
   }
 } finally {
