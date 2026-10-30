@@ -412,20 +412,16 @@ try {
       report.scenarios[`analysis-tab:${tab}`] = await measure(() => showTab(tab));
     }
     await showTab('定位与连续性');
-    const canvas = page.locator('.ant-tabs-content-active canvas').first();
-    await canvas.waitFor();
-    const box = await canvas.boundingBox();
+    // Narrow the analysis window to the last 15 h through the page's start field: the same state change a time-slider
+    // drag makes (setStart), so this measures re-analysis and chart refit. Slider drags are not reliable under
+    // automation (cursor hit-testing lags), so the gesture itself is checked by hand.
+    const range = () => page.locator('[aria-label="分析时间跨度"]').first().innerText();
+    const old = await range();
+    const end = await page.getByLabel('分析结束 UTC').inputValue();
+    const start = new Date(Date.parse(end + 'Z') - 15 * 3600 * 1000).toISOString().slice(0, 19);
     report.scenarios['analysis-zoom'] = await measure(async () => {
-      // Drag the time slider's left handle to 62 %: the analysis re-runs on the new window and the charts refit.
-      // (Shift + wheel is turned into horizontal scrolling by Chromium automation and never reaches ECharts.)
-      const range = () => page.locator('[aria-label="分析时间跨度"]').first().innerText();
-      const old = await range();
-      const y = box.y + box.height - 11;
-      await page.mouse.move(box.x + box.width * 0.0617, y);
-      await page.mouse.down();
-      await page.mouse.move(box.x + box.width * 0.62, y, { steps: 15 });
-      await page.mouse.up();
-      await page.waitForFunction((o) => document.querySelector('[aria-label="分析时间跨度"]')?.textContent !== o, old);
+      await page.getByLabel('分析开始 UTC').fill(start);
+      await page.waitForFunction((o) => document.querySelector('[aria-label="分析时间跨度"]')?.innerText !== o, old);
       return { ...(await settle()), windowAfterZoom: await range() };
     });
   }

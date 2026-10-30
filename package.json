@@ -1,6 +1,6 @@
 {
   "name": "findyou",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.25.0",
@@ -15,8 +15,8 @@
     "desktop:build": "node scripts/tauri.mjs build --no-bundle",
     "desktop:package": "pnpm desktop:build && node scripts/package.mjs",
     "test:ui": "node tests/ui-smoke.mjs",
-    "format": "node node_modules/prettier/bin/prettier.cjs --write \"src/**/*.{ts,tsx,css}\" \"contracts/**/*.{ts,json}\" \"mock/**/*.ts\" \"tests/**/*.{ts,mjs}\" \"*.{ts,js,json}\"",
-    "format:check": "node node_modules/prettier/bin/prettier.cjs --check \"src/**/*.{ts,tsx,css}\" \"contracts/**/*.{ts,json}\" \"mock/**/*.ts\" \"tests/**/*.{ts,mjs}\" \"*.{ts,js,json}\"",
+    "format": "node node_modules/prettier/bin/prettier.cjs --write \"src/**/*.{ts,tsx,css}\" \"contracts/**/*.{ts,json}\" \"tests/**/*.{ts,mjs}\" \"*.{ts,js,json}\"",
+    "format:check": "node node_modules/prettier/bin/prettier.cjs --check \"src/**/*.{ts,tsx,css}\" \"contracts/**/*.{ts,json}\" \"tests/**/*.{ts,mjs}\" \"*.{ts,js,json}\"",
     "lint": "node node_modules/eslint/bin/eslint.js src contracts tests",
     "verify": "pnpm check && pnpm lint && pnpm format:check && pnpm test"
   },

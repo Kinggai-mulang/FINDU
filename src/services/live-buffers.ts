@@ -111,7 +111,8 @@ export class LiveSessionBuffer {
       return d;
     }
     this.detailSummary = summaryText;
-    this.detail = { ...s, epochs, history, productHistory, logs, bufferedEpochs: epochs.length };
+    // bufferedEpochs stays the server value (same lock as the slice), which the view uses to tell loading from empty.
+    this.detail = { ...s, epochs, history, productHistory, logs };
     return this.detail;
   }
 

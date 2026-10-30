@@ -46,6 +46,7 @@ export default tseslint.config(
         structuredClone: 'readonly',
         innerWidth: 'readonly',
         Event: 'readonly',
+        getComputedStyle: 'readonly',
       },
     },
   },

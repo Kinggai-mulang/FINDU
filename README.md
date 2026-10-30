@@ -7,7 +7,7 @@ Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、�
 
 当前正式版：**v0.7.8**，运行引擎 **IPSPOS BetaV0.605**（GNSS Log=4 / StatusLog=1）。
 
-当前源码及本地构建：**v0.8.0 / IPSPOS BetaV0.611**，新增 DCB 单文件配置、原生模式 0 观测检查、CLAS／PPP-RTK 后处理和实时卫星详情。未发布到远端；见 [0.8.0 版本说明](docs/RELEASE-0.8.0.md) 与 [验证记录](docs/VALIDATION-0.8.0.md)。
+当前源码及本地构建：**v0.8.1 / IPSPOS BetaV0.611**。流畅度与细节优化：实时增量刷新，长时间运行和 6 路对比不再变慢；长后处理结果分析不再卡死；图例与图表样式统一；删除开发演示模式。未发布到远端；见 [0.8.1 版本说明](docs/RELEASE-0.8.1.md) 与 [验证记录](docs/VALIDATION-0.8.1.md)。0.8.0 新增的 DCB 单文件配置、原生模式 0 观测检查、CLAS／PPP-RTK 后处理和实时卫星详情见 [0.8.0 版本说明](docs/RELEASE-0.8.0.md)。
 
 ## 下载与运行
 
@@ -32,8 +32,7 @@ Windows GNSS 工作台，提供产品下载、后处理解算、实时监控、�
 git clone https://github.com/Kinggai-mulang/FINDU.git
 cd FINDU
 pnpm install --frozen-lockfile
-pnpm check
-pnpm test
+pnpm verify
 cargo test --manifest-path src-tauri/Cargo.toml --bin findyou
 pnpm desktop:dev
 ```
@@ -46,7 +45,7 @@ pnpm desktop:package
 
 打包会实际导入随包 Python 的 SSL、socket、压缩、SQLite、ctypes 和产品下载模块；缺失原生运行扩展时立即失败。
 
-输出位于 deliverables/FINDU-0.8.0-windows-x64。仅运行 pnpm dev 是浏览器界面预览，真实解算需要桌面程序。UI 冒烟测试可在 pnpm dev 启动后运行 pnpm test:ui，需要本机 Microsoft Edge。实时指标桌面回归脚本为 `tests/realtime-display-desktop.mjs`，通过 `FINDYOU_CDP` 指定独立测试副本的调试地址；脚本要求目标没有运行中的实时会话。
+输出位于 deliverables/FINDU-<版本>-windows-x64。维护约定、不变量与性能检查方法见 [CLAUDE.md](CLAUDE.md)；性能对比脚本为 `tests/perf-desktop.mjs`。仅运行 pnpm dev 是浏览器界面预览，真实解算需要桌面程序。UI 冒烟测试可在 pnpm dev 启动后运行 pnpm test:ui，需要本机 Microsoft Edge。实时指标桌面回归脚本为 `tests/realtime-display-desktop.mjs`，通过 `FINDYOU_CDP` 指定独立测试副本的调试地址；脚本要求目标没有运行中的实时会话。
 
 ## 仓库范围与数据
 
