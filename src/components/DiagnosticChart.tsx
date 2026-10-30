@@ -11,7 +11,7 @@ import {
   valueAxisStyle,
   valueSlider,
 } from './chart-theme';
-import { chartSamples } from '../diagnostics';
+import { chartColumns, samplePoint } from '../diagnostics';
 import { DISPLAY_COLUMNS, decimateIndices } from './decimate';
 import { useDetail } from './detail-context';
 import { utcAxisLabel } from '../time';
@@ -71,19 +71,23 @@ export const DiagnosticChart = memo(
       const short = distinctNames(datasets.map((d) => d.name));
       const series = datasets.flatMap((d, i) =>
         fields.flatMap((k, j) => {
-          const all = chartSamples(d.diagnostics ?? [], k, valueScale, logarithmic, bounds);
+          const all = chartColumns(d.diagnostics ?? [], k, valueScale, logarithmic, bounds);
           // Gap markers (null) and out-of-window points always survive thinning.
           const picked =
             detail === 'all'
               ? undefined
               : decimateIndices(
-                  all.map((v) => v[0] as number),
-                  all.map((v) => v[1]),
+                  all.time,
+                  all.value,
                   DISPLAY_COLUMNS,
-                  (index) => all[index][1] === null || all[index][3] !== 0,
+                  (index) => Number.isNaN(all.value[index]) || all.overflow[index] !== 0,
                 );
-          const data = !picked || picked.length === all.length ? all : picked.map((index) => all[index]);
-          const overflow = all.filter((v) => v[3]);
+          const data = picked
+            ? picked.map((index) => samplePoint(all, index))
+            : Array.from({ length: all.length }, (_, index) => samplePoint(all, index));
+          const overflow: ReturnType<typeof samplePoint>[] = [];
+          for (let index = 0; index < all.length; index++)
+            if (all.overflow[index]) overflow.push(samplePoint(all, index));
           outside += overflow.length;
           const color =
             datasets.length > 1

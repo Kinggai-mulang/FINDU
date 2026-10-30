@@ -31,26 +31,89 @@ export function inWindow<T extends { time: string }>(rows: T[], w: Window): T[] 
   const kept = rows.filter((_, i) => within(t[i], w));
   return kept.length === rows.length ? rows : kept;
 }
-export const median = (v: number[]) => quantile(v, 0.5);
-export function quantile(v: number[], p: number): number | null {
+const keyCache = new WeakMap<object[], Float64Array>();
+function keysOf<T extends object>(rows: T[], key: (row: T) => number) {
+  let keys = keyCache.get(rows);
+  if (!keys) {
+    keys = new Float64Array(rows.length);
+    for (let i = 0; i < rows.length; i++) keys[i] = key(rows[i]);
+    keyCache.set(rows, keys);
+  }
+  return keys;
+}
+/** `keyOf` of every epoch, computed once per array; an analysis walks the same epochs several times. */
+export const epochKeys = (epochs: Epoch[]) => keysOf(epochs, keyOf);
+/** `metricKey` of every diagnostics row, computed once per array. */
+export const rowKeys = (rows: RealtimeMetrics[]) => keysOf(rows, metricKey);
+
+export const median = (v: ArrayLike<number>) => quantile(v, 0.5);
+/** Linear-interpolated quantile, the value a full sort would give. */
+export function quantile(v: ArrayLike<number>, p: number): number | null {
   if (!v.length) return null;
-  // Typed-array sort is numeric and native, several times faster than a comparator on 170 000 values.
-  const a = Float64Array.from(v).sort(),
+  const a = Float64Array.from(v),
     i = (a.length - 1) * p,
     k = Math.floor(i);
-  return a[k] + (a[Math.min(k + 1, a.length - 1)] - a[k]) * (i - k);
+  if (a.some(Number.isNaN)) {
+    a.sort();
+    return a[k] + (a[Math.min(k + 1, a.length - 1)] - a[k]) * (i - k);
+  }
+  // Selection instead of sorting: two order statistics in linear time, for the medians and 95th percentiles of
+  // 170 000-epoch results.
+  const low = select(a, k);
+  let high = low;
+  if (k + 1 < a.length) {
+    high = a[k + 1];
+    for (let j = k + 2; j < a.length; j++) if (a[j] < high) high = a[j];
+  }
+  return low + (high - low) * (i - k);
+}
+/** Hoare quickselect: puts the k-th smallest value at `a[k]`, smaller ones before it and larger ones after it. */
+function select(a: Float64Array, k: number) {
+  let lo = 0,
+    hi = a.length - 1;
+  while (hi > lo) {
+    const pivot = a[(lo + hi) >> 1];
+    let i = lo,
+      j = hi;
+    while (i <= j) {
+      while (a[i] < pivot) i++;
+      while (a[j] > pivot) j--;
+      if (i <= j) {
+        const t = a[i];
+        a[i++] = a[j];
+        a[j--] = t;
+      }
+    }
+    if (k <= j) hi = j;
+    else if (k >= i) lo = i;
+    else break;
+  }
+  return a[k];
 }
 export function summarize(values: number[]) {
-  const v = values.filter(Number.isFinite);
-  if (!v.length) return { n: 0, mean: null, rms: null, std: null, p95: null, max: null };
-  const mean = v.reduce((a, b) => a + b, 0) / v.length;
+  const magnitudes = new Float64Array(values.length);
+  let n = 0,
+    sum = 0,
+    squares = 0,
+    max = 0;
+  for (const v of values) {
+    if (!Number.isFinite(v)) continue;
+    magnitudes[n++] = Math.abs(v);
+    sum += v;
+    squares += v * v;
+    max = Math.max(max, Math.abs(v));
+  }
+  if (!n) return { n: 0, mean: null, rms: null, std: null, p95: null, max: null };
+  const mean = sum / n;
+  let deviation = 0;
+  for (const v of values) if (Number.isFinite(v)) deviation += (v - mean) ** 2;
   return {
-    n: v.length,
+    n,
     mean,
-    rms: Math.sqrt(v.reduce((a, b) => a + b * b, 0) / v.length),
-    std: Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / v.length),
-    p95: quantile(v.map(Math.abs), 0.95),
-    max: v.reduce((a, b) => Math.max(a, Math.abs(b)), 0),
+    rms: Math.sqrt(squares / n),
+    std: Math.sqrt(deviation / n),
+    p95: quantile(magnitudes.subarray(0, n), 0.95),
+    max,
   };
 }
 export function validReference(text: string): [number, number, number] | null {
@@ -117,12 +180,17 @@ export function sharedResults(
     ),
   }));
 }
+/** Median positive spacing in seconds of ascending keys. */
+function medianStep(keys: Float64Array): number | null {
+  const steps: number[] = [];
+  for (let i = 1; i < keys.length; i++) {
+    const step = (keys[i] - keys[i - 1]) / 1000;
+    if (step > 0) steps.push(step);
+  }
+  return median(steps);
+}
 export function estimateInterval(epochs: Epoch[]): number {
-  const differences = epochs
-    .slice(1)
-    .map((e, i) => (keyOf(e) - keyOf(epochs[i])) / 1000)
-    .filter((n) => n > 0);
-  return median(differences) ?? 1;
+  return medianStep(epochKeys(epochs)) ?? 1;
 }
 export interface Event {
   id: string;
@@ -140,10 +208,11 @@ export function continuity(epochs: Epoch[], motion: Motion, interval = estimateI
   const segments: { start: string; end: string; n: number; seconds: number }[] = [];
   let segment: (typeof segments)[number] | undefined;
   let segmentKey = 0;
+  const keys = epochKeys(epochs);
   for (let i = 0; i < epochs.length; i++) {
     const e = epochs[i],
       prev = epochs[i - 1],
-      dt = prev ? (keyOf(e) - keyOf(prev)) / 1000 : 0;
+      dt = prev ? (keys[i] - keys[i - 1]) / 1000 : 0;
     const contiguous = !!prev && dt > 0 && dt <= interval * 1.5;
     if (prev && dt > interval * 1.5) {
       gaps++;
@@ -168,15 +237,24 @@ export function continuity(epochs: Epoch[], motion: Motion, interval = estimateI
       if (segment && contiguous) {
         segment.end = e.time;
         segment.n++;
-        segment.seconds = (keyOf(e) - segmentKey) / 1000;
+        segment.seconds = (keys[i] - segmentKey) / 1000;
       } else {
         segment = { start: e.time, end: e.time, n: 1, seconds: 0 };
-        segmentKey = keyOf(e);
+        segmentKey = keys[i];
         segments.push(segment);
       }
     } else segment = undefined;
   }
-  for (const s of [...steps].sort((a, b) => b.value - a.value).slice(0, 10))
+  // The ten largest steps in the order a stable descending sort gives, without sorting every step.
+  const largest: typeof steps = [];
+  for (const s of steps) {
+    if (largest.length === 10 && s.value <= largest[9].value) continue;
+    let at = largest.length;
+    while (at > 0 && largest[at - 1].value < s.value) at--;
+    largest.splice(at, 0, s);
+    if (largest.length > 10) largest.pop();
+  }
+  for (const s of largest)
     events.push({
       id: `step-${s.time}`,
       time: s.time,
@@ -203,21 +281,22 @@ export function convergence(
   interval: number,
 ): string | null {
   if (!reference || !horizontal || !vertical || hold === undefined || hold <= 0) return null;
-  let start: Epoch | undefined, last: Epoch | undefined;
-  for (const e of epochs) {
+  const keys = epochKeys(epochs);
+  let start: number | undefined;
+  for (let i = 0; i < epochs.length; i++) {
+    const e = epochs[i];
     if (
       !carrier(e) ||
       Math.hypot(e.e, e.n) > horizontal ||
       Math.abs(e.u) > vertical ||
-      (last && (keyOf(e) - keyOf(last)) / 1000 > interval * 1.5)
+      (i > 0 && (keys[i] - keys[i - 1]) / 1000 > interval * 1.5)
     ) {
       start = undefined;
     }
     if (carrier(e) && Math.hypot(e.e, e.n) <= horizontal && Math.abs(e.u) <= vertical) {
-      start ??= e;
-      if ((keyOf(e) - keyOf(start)) / 1000 >= hold) return start.time;
+      start ??= i;
+      if ((keys[i] - keys[start]) / 1000 >= hold) return epochs[start].time;
     }
-    last = e;
   }
   return null;
 }
@@ -261,33 +340,36 @@ export function buildAnalysis(
     epochs: inWindow(r.epochs, options.window),
     diagnostics: inWindow(r.diagnostics ?? [], options.window),
   }));
-  const sets = projected.map(
-    (r) => new Set(r.epochs.filter((e) => (options.cohort === 'common-fixed' ? fixed(e) : true)).map(keyOf)),
-  );
+  const sets = projected.map((r) => {
+    const keys = epochKeys(r.epochs);
+    const set = new Set<number>();
+    for (let i = 0; i < keys.length; i++) if (options.cohort !== 'common-fixed' || fixed(r.epochs[i])) set.add(keys[i]);
+    return set;
+  });
   const common = new Set(sets.length ? [...sets[0]].filter((k) => sets.every((s) => s.has(k))) : []);
   const base = projected.find((r) => r.id === options.baselineId) ?? projected[0];
-  const universe = new Set(
-    base?.diagnostics.length ? base.diagnostics.map(metricKey) : projected.flatMap((r) => r.epochs.map(keyOf)),
-  );
+  const universe = new Set<number>();
+  if (base?.diagnostics.length) for (const k of rowKeys(base.diagnostics)) universe.add(k);
+  else for (const r of projected) for (const k of epochKeys(r.epochs)) universe.add(k);
   const rows = projected.map((r) => {
-    const samples = r.epochs.filter((e) =>
+    const keys = epochKeys(r.epochs);
+    const samples = r.epochs.filter((e, i) =>
       options.cohort === 'fixed'
         ? fixed(e)
         : options.cohort === 'common' || options.cohort === 'common-fixed'
-          ? common.has(keyOf(e))
+          ? common.has(keys[i])
           : true,
     );
-    const keys = r.diagnostics.map(metricKey);
-    const actual = median(
-      keys
-        .slice(1)
-        .map((k, i) => (k - keys[i]) / 1000)
-        .filter((v) => v > 0),
-    );
+    const actual = medianStep(rowKeys(r.diagnostics));
     const ct = continuity(r.epochs, options.motion, actual ?? estimateInterval(r.epochs));
-    const countFixed = r.epochs.filter(fixed).length,
-      countCarrier = r.epochs.filter(carrier).length;
-    const candidates = r.epochs.filter((e) => universe.has(keyOf(e)));
+    let countFixed = 0,
+      countCarrier = 0,
+      candidates = 0;
+    for (let i = 0; i < keys.length; i++) {
+      if (fixed(r.epochs[i])) countFixed++;
+      if (carrier(r.epochs[i])) countCarrier++;
+      if (universe.has(keys[i])) candidates++;
+    }
     return {
       id: r.id,
       name: r.name,
@@ -295,8 +377,8 @@ export function buildAnalysis(
       n: samples.length,
       valid: r.epochs.length,
       denominator: universe.size,
-      coverage: universe.size ? candidates.length / universe.size : null,
-      missing: universe.size - candidates.length,
+      coverage: universe.size ? candidates / universe.size : null,
+      missing: universe.size - candidates,
       fixed: countFixed,
       carrier: countCarrier,
       fixedRate: arEnabled(r) && countCarrier ? countFixed / countCarrier : null,
@@ -335,20 +417,14 @@ export function buildAnalysis(
 }
 export const format = (v: number | null | undefined, digits = 4) =>
   v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(digits);
+const eventKinds = { FltR: '滤波重置', SlS: '周跳卫星', Disc: '相位偏差不连续' } as const;
 export function diagnosticEvents(history: RealtimeMetrics[]): Event[] {
-  return history.flatMap((m) =>
-    ['FltR', 'SlS', 'Disc'].flatMap((k) =>
-      typeof m[k] === 'number' && m[k] > 0
-        ? [
-            {
-              id: `${k}-${m.time}`,
-              time: m.time,
-              kind: { FltR: '滤波重置', SlS: '周跳卫星', Disc: '相位偏差不连续' }[k]!,
-              detail: `${k} = ${m[k]}`,
-              value: m[k] as number,
-            },
-          ]
-        : [],
-    ),
-  );
+  const events: Event[] = [];
+  for (const m of history)
+    for (const k of ['FltR', 'SlS', 'Disc'] as const) {
+      const value = m[k];
+      if (typeof value === 'number' && value > 0)
+        events.push({ id: `${k}-${m.time}`, time: m.time, kind: eventKinds[k], detail: `${k} = ${value}`, value });
+    }
+  return events;
 }

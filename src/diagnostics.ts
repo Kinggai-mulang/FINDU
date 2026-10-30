@@ -88,25 +88,73 @@ export function rowTimes(rows: RealtimeMetrics[]) {
   return hit;
 }
 
-export function chartSamples(rows: RealtimeMetrics[], key: string, scale = 1, log = false, display?: [number, number]) {
+/**
+ * One chart field as columns: time, display value, raw value (NaN = null) and -1/0/1 for points clamped to the
+ * reading window, with a null break inserted at each gap. Long results are thinned before any point object is
+ * built, so a 170 000-row field no longer allocates 170 000 small arrays.
+ */
+export interface SampleColumns {
+  length: number;
+  time: Float64Array;
+  value: Float64Array;
+  raw: Float64Array;
+  overflow: Int8Array;
+}
+export function chartColumns(
+  rows: RealtimeMetrics[],
+  key: string,
+  scale = 1,
+  log = false,
+  display?: [number, number],
+): SampleColumns {
   const { times, interval } = rowTimes(rows);
-  const data: (number | null)[][] = [];
+  // At most one gap marker per row.
+  const capacity = rows.length * 2;
+  const time = new Float64Array(capacity),
+    value = new Float64Array(capacity),
+    raw = new Float64Array(capacity),
+    overflow = new Int8Array(capacity);
+  let n = 0;
   let previous: number | undefined;
   for (let i = 0; i < rows.length; i++) {
-    const m = rows[i];
     const t = times[i];
     if (!Number.isFinite(t)) continue;
-    if (previous !== undefined && t - previous > interval * 1.5)
-      data.push([previous + Math.min(interval, (t - previous) / 2), null, null, 0]);
-    const raw = numeric(m, key);
-    let value = raw === null ? null : raw * scale;
-    if (log) value = raw === null || raw < 0 ? null : Math.max(0.0001, raw);
-    const overflow = value === null || !display ? 0 : value < display[0] ? -1 : value > display[1] ? 1 : 0;
-    if (value !== null && display) value = Math.max(display[0], Math.min(display[1], value));
-    data.push([t, value, raw, overflow]);
+    if (previous !== undefined && t - previous > interval * 1.5) {
+      time[n] = previous + Math.min(interval, (t - previous) / 2);
+      value[n] = raw[n] = NaN;
+      n++;
+    }
+    const r = numeric(rows[i], key);
+    let v = r === null ? null : r * scale;
+    if (log) v = r === null || r < 0 ? null : Math.max(0.0001, r);
+    overflow[n] = v === null || !display ? 0 : v < display[0] ? -1 : v > display[1] ? 1 : 0;
+    if (v !== null && display) v = Math.max(display[0], Math.min(display[1], v));
+    time[n] = t;
+    value[n] = v ?? NaN;
+    raw[n] = r ?? NaN;
+    n++;
     previous = t;
   }
-  return data;
+  return {
+    length: n,
+    time: time.subarray(0, n),
+    value: value.subarray(0, n),
+    raw: raw.subarray(0, n),
+    overflow: overflow.subarray(0, n),
+  };
+}
+const orNull = (v: number) => (Number.isNaN(v) ? null : v);
+/** Point `i` in the `[time, value, raw, overflow]` form ECharts series and reports use. */
+export const samplePoint = (s: SampleColumns, i: number) => [
+  s.time[i],
+  orNull(s.value[i]),
+  orNull(s.raw[i]),
+  s.overflow[i],
+];
+
+export function chartSamples(rows: RealtimeMetrics[], key: string, scale = 1, log = false, display?: [number, number]) {
+  const s = chartColumns(rows, key, scale, log, display);
+  return Array.from({ length: s.length }, (_, i) => samplePoint(s, i));
 }
 
 export function diagnosticCohort(results: ResultSet[], cohort: Cohort): ResultSet[] {
