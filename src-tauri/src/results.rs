@@ -1,3 +1,7 @@
+use crate::{
+    gnss_log::{Field, Rule},
+    table::{Cell, Table},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -41,7 +45,7 @@ pub struct RealResult {
     pub log_path: String,
     pub engine_commit: String,
     #[serde(default)]
-    pub diagnostics: Vec<serde_json::Value>,
+    pub diagnostics: Table,
     #[serde(default)]
     pub analysis_config: HashMap<String, String>,
     #[serde(default)]
@@ -112,6 +116,30 @@ pub fn config_summary(text: &str) -> HashMap<String, String> {
         .collect()
 }
 
+/// Validated time and solution of one Log=4 row. Any invalid row rejects the whole log.
+pub struct Stamp {
+    pub week: u32,
+    pub tow: f64,
+    pub time: String,
+    pub solution: &'static str,
+}
+pub fn stamp<'a>(get: impl Fn(&str) -> Option<&'a str>) -> Result<Stamp, String> {
+    let q = get("Q").and_then(|s| s.parse::<u8>().ok()).filter(|q| *q <= 8).ok_or("未知解状态定义")?;
+    let week = get("Week").and_then(|s| s.parse::<u32>().ok()).filter(|w| *w > 0).ok_or("GPS 周数无效")?;
+    let tow = get("TOW")
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|t| t.is_finite() && (0.0..604800.0).contains(t))
+        .ok_or("GPS 周内秒无效")?;
+    let dt = chrono::NaiveDateTime::parse_from_str(get("UTC").ok_or("缺少 UTC")?, "%Y%m%d%H%M%S%.f")
+        .map_err(|_| "日志 UTC 格式无效")?;
+    Ok(Stamp {
+        week,
+        tow,
+        time: dt.and_utc().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        solution: quality_name(q),
+    })
+}
+
 /// Preserve all current native fields, including signed atmosphere and RTK coordinates.
 pub fn diagnostic(fields: &HashMap<&str, &str>) -> Result<serde_json::Value, String> {
     let mut m = serde_json::Map::new();
@@ -119,37 +147,43 @@ pub fn diagnostic(fields: &HashMap<&str, &str>) -> Result<serde_json::Value, Str
         if *key == "UTC" {
             continue;
         }
-        let value = crate::gnss_log::number(key, raw);
-        let decoded = value.map_or_else(
-            || {
-                if !crate::gnss_log::known(key) && raw.parse::<f64>().is_err() {
-                    serde_json::json!(raw)
-                } else {
-                    serde_json::Value::Null
-                }
-            },
-            |v| serde_json::json!(v),
-        );
+        let decoded = match Rule::of(key).field(raw) {
+            Field::Number(v) => serde_json::json!(v),
+            Field::Missing => serde_json::Value::Null,
+            Field::Text(s) => serde_json::json!(s),
+        };
         m.insert((*key).into(), decoded);
     }
-    let q = fields.get("Q").and_then(|s| s.parse::<u8>().ok()).filter(|q| *q <= 8).ok_or("未知解状态定义")?;
-    let week =
-        fields.get("Week").and_then(|s| s.parse::<u32>().ok()).filter(|w| *w > 0).ok_or("GPS 周数无效")?;
-    let tow = fields
-        .get("TOW")
-        .and_then(|s| s.parse::<f64>().ok())
-        .filter(|t| t.is_finite() && (0.0..604800.0).contains(t))
-        .ok_or("GPS 周内秒无效")?;
-    let dt = chrono::NaiveDateTime::parse_from_str(fields.get("UTC").ok_or("缺少 UTC")?, "%Y%m%d%H%M%S%.f")
-        .map_err(|_| "日志 UTC 格式无效")?;
-    m.insert("Week".into(), serde_json::json!(week));
-    m.insert("TOW".into(), serde_json::json!(tow));
-    m.insert(
-        "time".into(),
-        serde_json::json!(dt.and_utc().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)),
-    );
-    m.insert("solution".into(), serde_json::json!(quality_name(q)));
+    let s = stamp(|k| fields.get(k).copied())?;
+    m.insert("Week".into(), serde_json::json!(s.week));
+    m.insert("TOW".into(), serde_json::json!(s.tow));
+    m.insert("time".into(), serde_json::json!(s.time));
+    m.insert("solution".into(), serde_json::json!(s.solution));
     Ok(serde_json::Value::Object(m))
+}
+
+fn cell(field: Field) -> Cell {
+    match field {
+        Field::Number(v) => Cell::Number(v),
+        Field::Missing => Cell::Null,
+        Field::Text(s) => Cell::Text(s),
+    }
+}
+
+/// Decoding rule and diagnostics column of every header column (none for UTC, which becomes `time`).
+struct Layout {
+    columns: Vec<(Rule, Option<usize>)>,
+    position: HashMap<String, usize>,
+    stamp: [usize; 4],
+}
+impl Layout {
+    fn new(header: &[String], table: &mut Table) -> Self {
+        Self {
+            columns: header.iter().map(|k| (Rule::of(k), (k != "UTC").then(|| table.column(k)))).collect(),
+            position: header.iter().enumerate().map(|(i, k)| (k.clone(), i)).collect(),
+            stamp: ["Week", "TOW", "time", "solution"].map(|k| table.column(k)),
+        }
+    }
 }
 
 pub fn find_solution_logs(root: &Path) -> Vec<PathBuf> {
@@ -232,7 +266,8 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
     let mut counts = HashMap::new();
     let mut origin = reference;
     let mut last_time = None;
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = Table::default();
+    let mut layout: Option<Layout> = None;
     let mut diagnostic_keys = std::collections::HashSet::new();
     let mut duplicate_rows = 0;
     let mut reader = BufReader::new(file);
@@ -246,22 +281,36 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
         let line = buffer.trim_end_matches(['\r', '\n']);
         if line.starts_with('#') {
             header.line(line)?;
+            layout = None;
             continue;
         }
         if line.trim().is_empty() {
             continue;
         }
-        let fields = match header.fields(line) {
-            Ok(fields) => fields,
+        let values = match header.values(line) {
+            Ok(values) => values,
             Err(_) if !complete => break,
             Err(error) => return Err(error),
         };
-        let number = |key: &str| fields.get(key).and_then(|v| crate::gnss_log::number(key, v));
+        let layout = layout.get_or_insert_with(|| Layout::new(&header.columns, &mut diagnostics));
+        let get = |key: &str| layout.position.get(key).map(|&i| values[i]);
+        let number =
+            |key: &str| layout.position.get(key).and_then(|&i| layout.columns[i].0.number(values[i]));
         total += 1;
-        let metric = diagnostic(&fields)?;
+        let stamp = stamp(get)?;
         let key = number("Week").zip(number("TOW")).map(|(w, t)| ((w * 604800. + t) * 1000.).round() as i64);
         if key.is_none_or(|k| diagnostic_keys.insert(k)) {
-            diagnostics.push(metric);
+            for (i, (rule, column)) in layout.columns.iter().enumerate() {
+                if let Some(c) = column {
+                    diagnostics.put(*c, cell(rule.field(values[i])));
+                }
+            }
+            let [week, tow, time, solution] = layout.stamp;
+            diagnostics.put(week, Cell::Number(stamp.week as f64));
+            diagnostics.put(tow, Cell::Number(stamp.tow));
+            diagnostics.put(time, Cell::Text(&stamp.time));
+            diagnostics.put(solution, Cell::Text(stamp.solution));
+            diagnostics.end_row();
         } else {
             duplicate_rows += 1;
         }
@@ -270,7 +319,7 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
             return Err("未知解状态定义".into());
         }
         let q = q as u8;
-        *counts.entry(quality_name(q).to_string()).or_insert(0) += 1;
+        *counts.entry(quality_name(q)).or_insert(0) += 1;
         let xyz = [
             number("X").unwrap_or(f64::NAN),
             number("Y").unwrap_or(f64::NAN),
@@ -297,13 +346,10 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
             continue;
         }
         last_time = Some(gps);
-        let utc = fields.get("UTC").ok_or("缺少 UTC")?;
-        let dt =
-            chrono::NaiveDateTime::parse_from_str(utc, "%Y%m%d%H%M%S%.f").map_err(|_| "日志 UTC 格式无效")?;
         let origin = *origin.get_or_insert(xyz);
         let [e, n, u] = enu(xyz, origin);
         epochs.push(RealEpoch {
-            time: dt.and_utc().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            time: stamp.time,
             e,
             n,
             u,
@@ -317,6 +363,7 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
             tow,
         });
     }
+    diagnostics.sort_columns();
     let reference_xyz = origin.ok_or("日志没有有效定位历元")?;
     if epochs.is_empty() {
         return Err("日志没有有效定位历元".into());
@@ -331,7 +378,7 @@ pub fn read_solution(path: &Path, reference: Option<[f64; 3]>) -> Result<RealRes
         reference_kind: if reference.is_some() { "configured" } else { "first-valid" }.into(),
         total_rows: total,
         rejected_rows: rejected,
-        quality_counts: counts,
+        quality_counts: counts.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
         output_dir: String::new(),
         log_path: path.to_string_lossy().into(),
         engine_commit: String::new(),

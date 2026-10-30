@@ -526,7 +526,7 @@ impl NativeRuntime {
                     }
                     if let Some(mut result) = preview {
                         retain_preview_tail(&mut result.epochs);
-                        retain_preview_tail(&mut result.diagnostics);
+                        result.diagnostics.retain_tail(300);
                         retain_preview_tail(&mut result.product_history);
                         result.is_live_cache = true;
                         t.preview = Some(result);

@@ -11,6 +11,8 @@ mod products;
 mod realtime;
 mod results;
 mod status_log;
+mod table;
+mod wire;
 use tauri::Manager;
 
 #[tauri::command]
@@ -30,9 +32,11 @@ async fn analysis_candidates(path: String) -> Result<Vec<String>, String> {
 async fn import_analysis(
     paths: Vec<String>,
     library: tauri::State<'_, std::sync::Arc<library::Library>>,
-) -> Result<Vec<results::RealResult>, String> {
+) -> Result<tauri::ipc::Response, String> {
     let lib = library.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || lib.import(paths)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || lib.import(paths).map(wire::response))
+        .await
+        .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn analysis_catalog(
@@ -44,9 +48,11 @@ fn analysis_catalog(
 async fn open_analysis(
     id: String,
     library: tauri::State<'_, std::sync::Arc<library::Library>>,
-) -> Result<results::RealResult, String> {
+) -> Result<tauri::ipc::Response, String> {
     let lib = library.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || lib.open(&id)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || lib.open(&id).map(|r| wire::response(vec![r])))
+        .await
+        .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn forget_analysis(
@@ -77,11 +83,14 @@ fn native_snapshot(runtime: tauri::State<'_, native::NativeRuntime>) -> native::
     runtime.snapshot()
 }
 #[tauri::command]
-fn native_result(
+async fn native_result(
     id: String,
     runtime: tauri::State<'_, native::NativeRuntime>,
-) -> Result<results::RealResult, String> {
-    runtime.result(&id)
+) -> Result<tauri::ipc::Response, String> {
+    let result = runtime.result(&id)?;
+    tauri::async_runtime::spawn_blocking(move || wire::response(vec![result]))
+        .await
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
 fn cancel_native(id: String, runtime: tauri::State<'_, native::NativeRuntime>) -> Result<(), String> {

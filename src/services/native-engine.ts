@@ -15,6 +15,7 @@ import { defaultConfig } from '../domain';
 import { isDesktop } from './files';
 import { configFromOpt } from './options';
 import { LiveSessionBuffer, type LiveCursor, type LiveDelta } from './live-buffers';
+import { decodeResults } from './result-wire';
 
 const sameItems = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length && a.every((item, i) => item === b[i]);
@@ -172,7 +173,7 @@ export class WorkbenchEngine {
       if (compare) this.refreshLiveResults();
       for (const t of this.native.tasks) {
         if (t.resultId && !this.results.has(t.resultId)) {
-          const r = await invoke<Omit<ResultSet, 'config'>>('native_result', { id: t.resultId });
+          const [r] = await decodeResults(await invoke<ArrayBuffer>('native_result', { id: t.resultId }));
           this.results.set(t.resultId, { ...r, config: configFromOpt(t.request.document.text, t.name) });
         }
       }
@@ -242,13 +243,13 @@ export class WorkbenchEngine {
   };
   openNativeFolder = (id: string) => invoke('open_native_folder', { id });
   async importResults(paths: string[]) {
-    const incoming = await invoke<Omit<ResultSet, 'config'>[]>('import_analysis', { paths });
+    const incoming = await decodeResults(await invoke<ArrayBuffer>('import_analysis', { paths }));
     for (const r of incoming) this.results.set(r.id, withConfig(r));
     this.publish();
     return incoming.map((r) => r.id);
   }
   async openArchived(id: string) {
-    const r = await invoke<Omit<ResultSet, 'config'>>('open_analysis', { id });
+    const [r] = await decodeResults(await invoke<ArrayBuffer>('open_analysis', { id }));
     this.results.set(r.id, withConfig(r));
     this.publish();
     return r.id;

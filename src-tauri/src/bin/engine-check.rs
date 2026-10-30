@@ -12,6 +12,8 @@ mod options;
 mod results;
 #[path = "../status_log.rs"]
 mod status_log;
+#[path = "../table.rs"]
+mod table;
 use std::{path::PathBuf, thread, time::Duration};
 fn main() {
     let args: Vec<String> = std::env::args().collect();

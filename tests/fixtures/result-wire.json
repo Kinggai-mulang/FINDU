@@ -1,0 +1,85 @@
+[
+  {
+    "id": "log-1",
+    "name": "KIN · 1",
+    "station": "WHU",
+    "source": "ipspos",
+    "epochs": [
+      {
+        "time": "2026-10-01T00:00:00.000Z",
+        "e": 0.0123,
+        "n": -0.5,
+        "u": 0.3333333333333333,
+        "x": -2267750.1234,
+        "y": 5009154.4567,
+        "z": 3221294.789,
+        "satellites": 21,
+        "solution": "FIX",
+        "rawQuality": 7,
+        "gpsWeek": 2438,
+        "tow": 345600.5
+      }
+    ],
+    "referenceXyz": [
+      -2267750.123,
+      5009154.456,
+      3221294.789
+    ],
+    "referenceKind": "first-valid",
+    "totalRows": 3,
+    "rejectedRows": 1,
+    "qualityCounts": {
+      "FIX": 2
+    },
+    "outputDir": "D:/out",
+    "logPath": "D:/out/a.log",
+    "engineCommit": "abc",
+    "diagnostics": [
+      {
+        "Big": 123456.789,
+        "Fine": 0.1234567891,
+        "Note": "2026-10-01T00:00:00Z",
+        "Obs": 31.0,
+        "PDOP": 1.13,
+        "Ratio": 2.5,
+        "Week": 2438.0,
+        "X": -2267750.1234,
+        "ZTD": 2.3456,
+        "ZWDUCor": -0.0,
+        "solution": "FIX",
+        "time": "2026-10-01T00:00:00.000Z"
+      },
+      {
+        "Big": null,
+        "Fine": 1e-12,
+        "Note": 4.0,
+        "Obs": null,
+        "PDOP": null,
+        "Ratio": 3.0,
+        "Week": 2438.0,
+        "X": 6378137.0001,
+        "ZTD": -0.0012,
+        "ZWDUCor": 0.5,
+        "solution": null,
+        "time": "2026-10-01T00:00:01.250Z"
+      }
+    ],
+    "analysisConfig": {},
+    "duplicateRows": 0,
+    "isLiveCache": false,
+    "productHistory": [
+      {
+        "orbit": 12,
+        "orbitAge": null,
+        "time": "2026-10-01T00:00:00.000Z"
+      }
+    ],
+    "runId": "",
+    "solutionMode": "PPP",
+    "logVersion": 4,
+    "engineBuildId": "",
+    "ntripLogPath": null,
+    "productLogPath": null,
+    "clientStatus": null
+  }
+]

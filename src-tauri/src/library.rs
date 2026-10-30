@@ -79,10 +79,13 @@ impl Library {
         if paths.is_empty() || paths.len() > 16 {
             return Err("一次请选择 1–16 个日志或会话目录".into());
         }
-        let mut incoming = Vec::new();
-        for path in paths {
-            incoming.push(load(Path::new(&path))?);
-        }
+        // One thread per log: a 47 h, 1 Hz log takes about a second to parse.
+        let incoming = std::thread::scope(|s| {
+            let jobs: Vec<_> = paths.iter().map(|p| s.spawn(move || load(Path::new(p)))).collect();
+            jobs.into_iter()
+                .map(|j| j.join().unwrap_or_else(|_| Err("结果解析异常中止".into())))
+                .collect::<Result<Vec<_>, _>>()
+        })?;
         let _lock = self.lock.lock().unwrap();
         let mut entries = self.entries()?;
         for r in &incoming {
@@ -250,7 +253,7 @@ mod tests {
         let library = Library::new(&root);
         let r = library.import(vec![options::display_path(&path)]).unwrap();
         assert_eq!(r[0].diagnostics.len(), 1);
-        assert!(r[0].diagnostics[0]["Ratio"].is_null());
+        assert!(r[0].diagnostics.get(0, "Ratio").is_null());
         let reopened = Library::new(&root);
         assert_eq!(reopened.open(&r[0].id).unwrap().epochs.len(), 1);
         reopened.import(vec![options::display_path(&path)]).unwrap();

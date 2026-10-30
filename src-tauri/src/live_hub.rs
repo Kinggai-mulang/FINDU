@@ -133,7 +133,7 @@ fn comparison_snapshot(s: LiveSnapshot) -> RealResult {
         output_dir: s.output_dir,
         log_path: s.log_path.unwrap_or_default(),
         engine_commit: s.engine_commit,
-        diagnostics: s.history,
+        diagnostics: crate::table::Table::from_rows(&s.history),
         analysis_config: s.analysis_config,
         duplicate_rows: 0,
         is_live_cache: true,
@@ -178,7 +178,7 @@ mod comparison_tests {
         assert_eq!(result.id, "live-pending");
         assert!(result.epochs.is_empty());
         assert!(result.reference_xyz.is_none());
-        assert_eq!(result.diagnostics[0]["Obs"], 31);
+        assert_eq!(result.diagnostics.get(0, "Obs").as_f64(), Some(31.));
         assert_eq!(result.product_history[0]["orbit"], 12);
         let json = serde_json::to_value(result).unwrap();
         assert!(json.get("referenceXyz").is_none());

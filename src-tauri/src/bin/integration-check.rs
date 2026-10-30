@@ -19,6 +19,8 @@ mod realtime;
 mod results;
 #[path = "../status_log.rs"]
 mod status_log;
+#[path = "../table.rs"]
+mod table;
 use std::{
     fs,
     path::PathBuf,

@@ -31,6 +31,7 @@ __pycache__/
 !/tests/satellites-ui.mjs
 !/tests/realtime-replay.py
 !/tests/perf-desktop.mjs
+!/tests/fixtures/
 # Publish maintained documentation, not local investigation evidence
 /docs/*
 !/docs/RELEASE-0.7.5.md
