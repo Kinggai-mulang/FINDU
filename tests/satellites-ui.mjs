@@ -9,7 +9,7 @@ await fs.writeFile(
 );
 await fs.writeFile(
   'runtime/satellite-ui/main.tsx',
-  `import React from 'react';import {createRoot} from 'react-dom/client';import {ConfigProvider,App,theme} from 'antd';import SatelliteDetails from '/src/components/SatelliteDetails';createRoot(document.getElementById('root')!).render(<ConfigProvider theme={{algorithm:theme.darkAlgorithm}}><App><SatelliteDetails sessionKey="test" runId="run-test" sample={1} active={true}/></App></ConfigProvider>);`,
+  `import React from 'react';import {createRoot} from 'react-dom/client';import {ConfigProvider,App,theme} from 'antd';import SatelliteDetails from '/src/components/SatelliteDetails';function Tab(){const [open,setOpen]=React.useState(false);return <><button onClick={()=>setOpen(!open)}>卫星详情页签</button>{open&&<SatelliteDetails sessionKey="test" runId="run-test" sample={1} active={true}/>}</>;}createRoot(document.getElementById('root')!).render(<ConfigProvider theme={{algorithm:theme.darkAlgorithm}}><App><Tab/></App></ConfigProvider>);`,
 );
 const fixture = process.argv[2]
   ? JSON.parse(await fs.readFile(process.argv[2], 'utf8'))
@@ -64,9 +64,10 @@ await page.addInitScript((snapshot) => {
   };
 }, fixture);
 await page.goto('http://127.0.0.1:1420/runtime/satellite-ui/index.html');
-await page.getByText('卫星详情 · 星空 / 频点 / 载噪比', { exact: true }).waitFor();
-assert.equal(await page.evaluate(() => window.calls.length), 0, 'collapsed detail must not subscribe');
-await page.getByText('卫星详情 · 星空 / 频点 / 载噪比', { exact: true }).click();
+// The monitor mounts the details only while their tab is open; the button stands in for that tab.
+await page.getByRole('button', { name: '卫星详情页签' }).waitFor();
+assert.equal(await page.evaluate(() => window.calls.length), 0, 'closed tab must not subscribe');
+await page.getByRole('button', { name: '卫星详情页签' }).click();
 await page.getByText(new RegExp(`观测 ${fixture.satellites.length} 颗`)).waitFor();
 assert.equal(await page.locator('canvas').count(), 3);
 await page.waitForTimeout(2300);
@@ -158,15 +159,15 @@ const timing = await page.evaluate(async () => {
   return times.sort((a, b) => a - b)[28];
 });
 assert.ok(timing < 100, `signal chart P95 ${timing} ms`);
-await page.getByText('卫星详情 · 星空 / 频点 / 载噪比', { exact: true }).click();
+await page.getByRole('button', { name: '卫星详情页签' }).click();
 await page.waitForTimeout(500);
-assert.equal(await page.locator('canvas').count(), 0, 'collapse must dispose charts');
+assert.equal(await page.locator('canvas').count(), 0, 'leaving the tab must dispose charts');
 const after = await page.evaluate(() => window.calls.filter((c) => c.enabled).length);
 await page.waitForTimeout(1200);
 assert.equal(
   await page.evaluate(() => window.calls.filter((c) => c.enabled).length),
   after,
-  'collapsed polling stopped',
+  'polling stopped after leaving the tab',
 );
 assert.ok(await page.evaluate(() => window.calls.some((c) => c.enabled === false)));
 assert.deepEqual(errors, []);
@@ -176,7 +177,7 @@ const evidence = {
   layout,
   narrow,
   cases: [
-    'collapsed-no-subscription',
+    'closed-tab-no-subscription',
     'three-charts',
     '1Hz',
     'system-band-filter',

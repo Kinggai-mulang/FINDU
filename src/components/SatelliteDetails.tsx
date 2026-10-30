@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Alert, Collapse, Select, Space, Tag } from 'antd';
+import { Alert, Select, Space, Tag } from 'antd';
 import * as echarts from 'echarts/core';
 import { BarChart, ScatterChart } from 'echarts/charts';
 import { GridComponent, PolarComponent, TooltipComponent, DataZoomComponent } from 'echarts/components';
@@ -490,16 +490,15 @@ function SatelliteLive({
   );
 }
 
+/**
+ * Shown directly: the monitor mounts this only while the 卫星详情 tab is open (destroyOnHidden), so the 1 Hz
+ * subscription starts on entering the tab and is released on leaving it or when the window is hidden.
+ */
 export default function SatelliteDetails(props: {
   sessionKey: string;
   runId: string;
   sample: number;
   active: boolean;
 }) {
-  return (
-    <Collapse
-      destroyOnHidden
-      items={[{ key: 'satellites', label: '卫星详情 · 星空 / 频点 / 载噪比', children: <SatelliteLive {...props} /> }]}
-    />
-  );
+  return <SatelliteLive {...props} />;
 }
