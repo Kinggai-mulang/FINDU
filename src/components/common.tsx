@@ -1,4 +1,4 @@
-import { Alert, Empty, Tag } from 'antd';
+import { Empty, Tag } from 'antd';
 import type { ReactNode } from 'react';
 
 export function Panel({
@@ -68,21 +68,11 @@ export function PageHeading({
     </div>
   );
 }
-export function NoData({ text = '暂无数据，请先启动模拟数据流' }: { text?: string }) {
+export function NoData({ text = '暂无数据' }: { text?: string }) {
   return (
     <div className="empty-state">
       <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={text} />
     </div>
-  );
-}
-export function MockNote() {
-  return (
-    <Alert
-      type="info"
-      showIcon
-      title="模拟模式 · 当前数据仅用于工作流验证，不代表真实解算精度。"
-      className="mock-note"
-    />
   );
 }
 export function SolutionTag({ value }: { value?: string }) {

@@ -171,7 +171,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
     invoke<OptDocument[]>('import_opts', {
       paths: record.manifest?.results.filter((r) => r.status === 'ready' && r.opt).map((r) => r.opt) ?? [],
     });
-  const useReady = async (record: ProductRecord) => {
+  const sendReady = async (record: ProductRecord) => {
     try {
       onPrepared(await readyDocs(record));
     } catch (e) {
@@ -569,7 +569,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                       )}
                       {ready.length > 0 && (
                         <>
-                          <Button size="small" type="primary" onClick={() => useReady(record)}>
+                          <Button size="small" type="primary" onClick={() => sendReady(record)}>
                             送入后处理 · {ready.length} 个方案
                           </Button>
                           <Button size="small" onClick={() => exportReady(record)}>

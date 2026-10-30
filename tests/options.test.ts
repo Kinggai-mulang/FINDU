@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { parseOpt, patchOpt, configFromOpt } from '../src/services/options';
-import { statistics } from '../src/domain';
-import { makeEpoch } from '../mock/data';
 
 describe('真实 OPT 编辑', () => {
   const text =
@@ -25,14 +23,4 @@ describe('真实 OPT 编辑', () => {
   it('从 OPT 生成可追溯的任务参数摘要', () => {
     expect(configFromOpt(text + 'GNSS_RoveSampleTime = 30;', 'sample').intervalSec).toBe(30);
   });
-});
-it('HOLD 计完整固定，部分固定 FLOFIX 单列', () => {
-  const e = makeEpoch(1, 0, 0);
-  const result = statistics([
-    { ...e, solution: 'FIX' },
-    { ...e, solution: 'HOLD' },
-    { ...e, solution: 'FLOFIX' },
-    { ...e, solution: 'FLOAT' },
-  ]);
-  expect(result.fixedRate).toBe(0.5);
 });

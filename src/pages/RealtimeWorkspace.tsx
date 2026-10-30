@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { App, Button, Input, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { FolderOpenOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import type { RealtimeDocument, RealtimeSnapshot, WorkbenchSnapshot } from '../../contracts';
+import type { RealtimeDocument, RealtimeSnapshot } from '../../contracts';
 import RealtimeMonitor, { seedRealtimeDraft, realtimeDraftRequest } from './RealtimeMonitor';
-import { workbenchEngine } from '../services/native-engine';
+import { useEngine, workbenchEngine } from '../services/native-engine';
 import { forgetRealtimeDraft } from '../services/realtime-drafts';
 import { isDesktop } from '../services/files';
 import { useOptDrop } from '../services/opt-drop';
@@ -31,13 +31,9 @@ const metric = (s: RealtimeSnapshot | undefined, k: string, now: number, d = 0) 
   const value = realtimeDisplay(s, now).metrics?.[k];
   return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(d) : '—';
 };
-export default function RealtimeWorkspace({
-  snapshot,
-  onResults,
-}: {
-  snapshot: WorkbenchSnapshot;
-  onResults: (ids: string[]) => void;
-}) {
+export default function RealtimeWorkspace({ onResults }: { onResults: (ids: string[]) => void }) {
+  const realtimeSessions = useEngine((s) => s.realtimeSessions);
+  const realtime = useEngine((s) => s.realtime);
   const { message } = App.useApp();
   const [pending, setPendingState] = useState(savedPending);
   const [focus, setFocusState] = useState(savedFocus);
@@ -53,7 +49,7 @@ export default function RealtimeWorkspace({
     savedChecked = ids;
     setCheckedState(ids);
   };
-  const sessions = snapshot.realtimeSessions ?? [];
+  const sessions = realtimeSessions ?? [];
   const rows: Row[] = [
     ...sessions.map((s) => ({
       key: s.sessionKey,
@@ -68,9 +64,7 @@ export default function RealtimeWorkspace({
     focus === '__new__' ? '__new__' : rows.some((r) => r.key === focus) ? focus : rows[0]?.key || '__new__';
   const chosen = rows.find((r) => r.key === focusKey);
   const detail =
-    snapshot.realtime?.sessionKey === focusKey && snapshot.realtime.id === chosen?.snapshot?.id
-      ? snapshot.realtime
-      : chosen?.snapshot;
+    realtime?.sessionKey === focusKey && realtime.id === chosen?.snapshot?.id ? realtime : chosen?.snapshot;
   const [now, setNow] = useState(() => Date.now() / 1000);
   const running = sessions.filter(active).length;
   useEffect(() => {

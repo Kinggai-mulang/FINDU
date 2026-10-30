@@ -34,7 +34,7 @@ import type {
 } from '../../contracts';
 import { Chart, EnuChart } from '../components/Charts';
 import { Metric, NoData, PageHeading, Panel, SolutionTag } from '../components/common';
-import { exportText, isDesktop, pickPath } from '../services/files';
+import { exportText, isDesktop } from '../services/files';
 import { readStored, writeStored } from '../services/storage';
 import { useOptDrop } from '../services/opt-drop';
 import { PathInput } from '../components/PathInput';

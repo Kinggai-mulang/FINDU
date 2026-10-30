@@ -44,6 +44,8 @@ export default tseslint.config(
         Response: 'readonly',
         URL: 'readonly',
         structuredClone: 'readonly',
+        innerWidth: 'readonly',
+        Event: 'readonly',
       },
     },
   },

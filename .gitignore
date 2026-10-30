@@ -26,11 +26,11 @@ __pycache__/
 /tests/*
 !/tests/*.test.ts
 !/tests/ui-smoke.mjs
-!/tests/ui-values.mjs
 !/tests/native-observation.py
 !/tests/products-optional.py
 !/tests/satellites-ui.mjs
 !/tests/realtime-replay.py
+!/tests/perf-desktop.mjs
 # Publish maintained documentation, not local investigation evidence
 /docs/*
 !/docs/RELEASE-0.7.5.md

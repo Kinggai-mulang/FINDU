@@ -1,16 +1,16 @@
 import capacity from '../../contracts/capacity.json';
+import { useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type {
   EngineInfo,
-  EngineService,
   NativeRunRequest,
   NativeSnapshot,
   NativeTask,
   ResultSet,
   Task,
   RealtimeSnapshot,
+  WorkbenchSnapshot,
 } from '../../contracts';
-import { MockEngineService } from './engine';
 import { defaultConfig } from '../domain';
 import { isDesktop } from './files';
 import { configFromOpt } from './options';
@@ -18,14 +18,12 @@ const sameItems = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length && a.every((item, i) => item === b[i]);
 
 /** One polling subscription for the application; overviews omit per-epoch histories. */
-export class WorkbenchEngine implements EngineService {
-  private mock = new MockEngineService();
+export class WorkbenchEngine {
   private listeners = new Set<() => void>();
-  private snapshot = this.mock.getSnapshot();
+  private snapshot: WorkbenchSnapshot = { tasks: [], results: [], logs: [] };
   private native: NativeSnapshot = { tasks: [], logs: [], concurrency: 2 };
   private results = new Map<string, ResultSet>();
   private timer?: ReturnType<typeof setInterval>;
-  private unsubscribeMock?: () => void;
   private polling = false;
   private errorReported = false;
   private liveSelectionVersion = 0;
@@ -45,24 +43,17 @@ export class WorkbenchEngine implements EngineService {
   private visibleAnalysisIds?: Set<string>;
   getSnapshot = () => this.snapshot;
   private publish = () => {
-    const m = this.mock.getSnapshot();
-    const incoming = [...m.results, ...this.results.values(), ...this.liveResults];
-    const inputs = [m, this.native, this.realtime, this.sessions, this.liveResults, ...incoming];
+    const incoming = [...this.results.values(), ...this.liveResults];
+    const inputs = [this.native, this.realtime, this.sessions, this.liveResults, ...incoming];
     if (sameItems(inputs, this.publishedInputs)) return;
     this.publishedInputs = inputs;
     const results = sameItems(incoming, this.snapshot.results) ? this.snapshot.results : incoming;
     this.snapshot = {
-      ...m,
       realtime: this.realtime,
       realtimeSessions: this.sessions,
-      tasks: [...this.native.tasks.map((t) => this.task(t)), ...m.tasks],
+      tasks: this.native.tasks.map((t) => this.task(t)),
       results,
-      logs: [
-        ...m.logs.map((l) => (l.id === 0 ? { ...l, message: '演示服务已就绪；桌面真实任务由 IPSPOS 引擎执行' } : l)),
-        ...this.native.logs.map((l) => ({ ...l, id: l.id + 1000000 })),
-      ]
-        .sort((a, b) => a.time.localeCompare(b.time))
-        .slice(-500),
+      logs: this.native.logs.slice(-500),
     };
     this.listeners.forEach((fn) => fn());
   };
@@ -73,7 +64,7 @@ export class WorkbenchEngine implements EngineService {
     const mapped: Task = {
       ...t,
       source: 'ipspos',
-      request: { input: t.request.document.sourcePath, outputDir: t.outputDir, config, simulateFailure: false },
+      request: { input: t.request.document.sourcePath, outputDir: t.outputDir, config },
       preview: t.preview ? ({ ...t.preview, config } as ResultSet) : undefined,
     };
     this.mappedTasks.set(t, mapped);
@@ -90,18 +81,13 @@ export class WorkbenchEngine implements EngineService {
   }
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
-    if (!this.unsubscribeMock) {
-      this.unsubscribeMock = this.mock.subscribe(this.publish);
-      if (isDesktop()) {
-        void this.poll();
-        this.timer = setInterval(() => void this.poll(), 1000);
-      }
+    if (!this.timer && isDesktop()) {
+      void this.poll();
+      this.timer = setInterval(() => void this.poll(), 1000);
     }
     return () => {
       this.listeners.delete(fn);
       if (!this.listeners.size) {
-        this.unsubscribeMock?.();
-        this.unsubscribeMock = undefined;
         clearInterval(this.timer);
         this.timer = undefined;
       }
@@ -246,16 +232,20 @@ export class WorkbenchEngine implements EngineService {
     this.publish();
     return r.id;
   }
-  createTask = (request: Parameters<EngineService['createTask']>[0]) => this.mock.createTask(request);
   cancelTask = (id: string) => {
     if (this.native.tasks.some((t) => t.id === id)) {
       void invoke('cancel_native', { id })
         .then(() => this.poll())
         .catch(console.error);
-    } else this.mock.cancelTask(id);
+    }
   };
-  setStation = (id: string) => this.mock.setStation(id);
-  startLive = () => this.mock.startLive();
-  stopLive = () => this.mock.stopLive();
 }
 export const workbenchEngine = new WorkbenchEngine();
+
+/**
+ * Subscribe to one slice of the workbench snapshot. Return a property of the snapshot, never a derived array,
+ * so components re-render only when that slice changes.
+ */
+export function useEngine<T>(select: (snapshot: WorkbenchSnapshot) => T): T {
+  return useSyncExternalStore(workbenchEngine.subscribe, () => select(workbenchEngine.getSnapshot()));
+}

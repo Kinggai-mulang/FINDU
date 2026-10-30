@@ -16,11 +16,11 @@ import {
   Progress,
   Segmented,
 } from 'antd';
-import { FolderOpenOutlined, PlayCircleOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
-import type { EngineInfo, OptDocument, Task, WorkbenchSnapshot } from '../../contracts';
-import { workbenchEngine } from '../services/native-engine';
+import { PlayCircleOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons';
+import type { EngineInfo, OptDocument, Task } from '../../contracts';
+import { useEngine, workbenchEngine } from '../services/native-engine';
 import { parseOpt, patchOpt } from '../services/options';
-import { exportText, isDesktop, pickPath } from '../services/files';
+import { exportText, isDesktop } from '../services/files';
 import { statusColors, statusText } from '../domain';
 import { EnuChart } from '../components/Charts';
 import { useOptDrop } from '../services/opt-drop';
@@ -50,12 +50,10 @@ const phaseNames: Record<string, string> = {
 };
 
 export default function NativePostProcess({
-  snapshot,
   onResult,
   documents,
   setDocuments,
 }: {
-  snapshot: WorkbenchSnapshot;
   onResult: (id: string) => void;
   documents: OptDocument[];
   setDocuments: Dispatch<SetStateAction<OptDocument[]>>;
@@ -87,7 +85,7 @@ export default function NativePostProcess({
       setActive(documents.length);
     } else setDocuments((ds) => ds.map((d, i) => (i === active ? { ...d, text } : d)));
   };
-  const tasks = snapshot.tasks.filter((t) => t.source === 'ipspos');
+  const tasks = useEngine((s) => s.tasks);
   const previewTask =
     tasks.find((t) => t.id === previewId) ||
     tasks.find((t) => t.status === 'running' && t.preview) ||

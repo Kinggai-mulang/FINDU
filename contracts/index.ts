@@ -1,5 +1,5 @@
 /** App contracts v1. Times are ISO-8601 UTC; UI explicitly displays UTC. ENU is in metres.
- * source=mock: synthetic errors. source=ipspos: ENU relative to referenceXyz.
+ * ENU is relative to referenceXyz.
  * first-valid is a relative origin, not an independent accuracy reference.
  */
 export type Solution = 'NONE' | 'SPP' | 'SPP_EKF' | 'PRE' | 'CODE' | 'FLOAT' | 'FLOFIX' | 'FIX' | 'HOLD' | 'REFERENCE';
@@ -31,7 +31,7 @@ export interface ResultSet {
   id: string;
   name: string;
   station: string;
-  source: 'mock' | 'ipspos';
+  source: 'ipspos';
   epochs: Epoch[];
   config: SolverConfig;
   referenceXyz?: number[];
@@ -62,19 +62,10 @@ export interface ResultEntry {
   station: string;
   savedAt: string;
 }
-export interface Statistics {
-  rmsE: number;
-  rmsN: number;
-  rmsU: number;
-  fixedRate: number;
-  validEpochs: number;
-  totalEpochs: number;
-}
 export interface TaskRequest {
   input: string;
   outputDir: string;
   config: SolverConfig;
-  simulateFailure: boolean;
 }
 export interface Task {
   id: string;
@@ -85,7 +76,7 @@ export interface Task {
   request: TaskRequest;
   resultId?: string;
   error?: string;
-  source?: 'mock' | 'ipspos';
+  source?: 'ipspos';
   phase?: string;
   elapsedSec?: number;
   startedAt?: string;
@@ -106,16 +97,6 @@ export interface WorkbenchSnapshot {
   logs: LogEntry[];
   realtime?: RealtimeSnapshot;
   realtimeSessions?: RealtimeSnapshot[];
-  live: { station: string; running: boolean; epochs: Epoch[] };
-}
-export interface EngineService {
-  subscribe: (callback: () => void) => () => void;
-  getSnapshot: () => WorkbenchSnapshot;
-  createTask: (request: TaskRequest) => string;
-  cancelTask: (id: string) => void;
-  setStation: (station: string) => void;
-  startLive: () => void;
-  stopLive: () => void;
 }
 
 export interface OptDocument {

@@ -18,7 +18,7 @@ import {
   Segmented,
 } from 'antd';
 import { DownloadOutlined, FolderOpenOutlined, HistoryOutlined, UploadOutlined } from '@ant-design/icons';
-import type { ResultEntry, ResultSet } from '../../contracts';
+import type { ResultEntry } from '../../contracts';
 import {
   buildAnalysis,
   resultGroupKey,
@@ -29,7 +29,7 @@ import {
   type Motion,
 } from '../analysis';
 import { exportText, exportPng, isDesktop, pickPath } from '../services/files';
-import { workbenchEngine } from '../services/native-engine';
+import { useEngine, workbenchEngine } from '../services/native-engine';
 import { readStored, writeStored } from '../services/storage';
 import { CompareChart } from '../components/Charts';
 import { DiagnosticChart } from '../components/DiagnosticChart';
@@ -62,15 +62,8 @@ type Meta = { name?: string; group?: string };
 const utcValue = (value: number) => (Number.isFinite(value) ? new Date(value).toISOString().slice(0, 23) : '');
 const parseUtc = (s: string) => (s ? Date.parse(s + 'Z') : undefined);
 const time = (s: string | undefined | null) => (s ? s.replace('T', ' ').replace('Z', '') : '—');
-function Analysis({
-  results,
-  selected,
-  onSelected,
-}: {
-  results: ResultSet[];
-  selected: string[];
-  onSelected: (ids: string[]) => void;
-}) {
+function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (ids: string[]) => void }) {
+  const results = useEngine((s) => s.results);
   const { message } = App.useApp();
   const [paths, setPaths] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1123,11 +1116,4 @@ function Analysis({
   );
 }
 
-export default memo(
-  Analysis,
-  (a, b) =>
-    a.onSelected === b.onSelected &&
-    a.selected === b.selected &&
-    a.results.length === b.results.length &&
-    a.results.every((r, i) => r === b.results[i]),
-);
+export default memo(Analysis);

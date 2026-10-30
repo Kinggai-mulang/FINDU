@@ -234,14 +234,6 @@ a:focus-visible {
   border-radius: 50%;
   background: #5c8dcc;
 }
-.mock-badge {
-  border-color: #775e36 !important;
-  background: #342b1e !important;
-  color: #dfb56f !important;
-  font-size: 10px !important;
-  margin: 0 !important;
-  line-height: 20px !important;
-}
 .top-info {
   color: #60728c;
   font-size: 8px;
