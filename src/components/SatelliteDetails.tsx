@@ -28,6 +28,12 @@ echarts.use([
 ]);
 
 // Keep the PRN and marker in one symbol so nearby satellites cannot mix labels and colours.
+const axis = {
+  axisLabel: { color: '#9EADC3', fontSize: 12 },
+  axisLine: { show: false },
+  axisTick: { show: false },
+  splitLine: { lineStyle: { color: '#FFFFFF0D' } },
+};
 function satelliteSymbol(prn: string, system: string, used: boolean | null) {
   const color = systemColors[system];
   const fill = used ? color : '#152133';
@@ -176,12 +182,6 @@ function SatelliteLive({
   const bands = useMemo(() => [...new Set(rows.flatMap((s) => s.signals.map((f) => f.band)))].sort(), [rows]);
   const selected = useMemo(() => rows.filter((s) => prn === 'all' || s.prn === prn), [rows, prn]);
 
-  const axis = {
-    axisLabel: { color: '#9EADC3', fontSize: 12 },
-    axisLine: { show: false },
-    axisTick: { show: false },
-    splitLine: { lineStyle: { color: '#FFFFFF0D' } },
-  };
   const fill = (color: string) => ({
     type: 'linear' as const,
     x: 0,

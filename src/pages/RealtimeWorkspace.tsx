@@ -5,9 +5,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { App, Button, Input, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { FolderOpenOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { RealtimeDocument, RealtimeSnapshot } from '../../contracts';
-import RealtimeMonitor, { seedRealtimeDraft, realtimeDraftRequest } from './RealtimeMonitor';
+import RealtimeMonitor from './RealtimeMonitor';
+import { forgetRealtimeDraft, seedRealtimeDraft, realtimeDraftRequest } from '../services/realtime-drafts';
 import { useEngine, workbenchEngine } from '../services/native-engine';
-import { forgetRealtimeDraft } from '../services/realtime-drafts';
+
 import { isDesktop } from '../services/files';
 import { useOptDrop } from '../services/opt-drop';
 import { sessionName, compactSessionName, nextOrdinal } from '../services/session-names';

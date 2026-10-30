@@ -29,15 +29,20 @@ export function AtmosphereDiagnostics(props: DiagnosticProps) {
     () => (view === 'events' ? atmosphereEvents(results, threshold) : []),
     [results, threshold, view],
   );
-  const statsResults = results.map((r) => ({
-    ...r,
-    diagnostics:
-      state === 'all'
-        ? r.diagnostics
-        : r.diagnostics?.filter((m) =>
-            state === 'fixed' ? ['FIX', 'HOLD'].includes(m.solution) : m.solution === state,
-          ),
-  }));
+  // Rebuilt only when its inputs change; a 170 000-row filter on every render was noticeable.
+  const statsResults = useMemo(
+    () =>
+      results.map((r) => ({
+        ...r,
+        diagnostics:
+          state === 'all'
+            ? r.diagnostics
+            : r.diagnostics?.filter((m) =>
+                state === 'fixed' ? ['FIX', 'HOLD'].includes(m.solution) : m.solution === state,
+              ),
+      })),
+    [results, state],
+  );
   const stats = useMemo(
     () =>
       view === 'statistics'
@@ -45,7 +50,7 @@ export function AtmosphereDiagnostics(props: DiagnosticProps) {
           ? atmosphereWindowStats(statsResults, common)
           : atmosphereStats(statsResults, common).map((r) => ({ ...r, window: '当前选定时段' }))
         : [],
-    [results, state, common, view, bucket],
+    [statsResults, common, view, bucket],
   );
   if (!results.length) return <NoData text="大气与状态耦合仅用于 PPP 结果" />;
   const jump = (at: string) => {

@@ -50,6 +50,9 @@ export const DiagnosticChart = memo(
     const detail = useDetail();
     const bounds = logarithmic ? ([0.0001, 1] as [number, number]) : displayBounds;
     const boundsKey = bounds?.join(',');
+    const fieldsKey = fields.join('|');
+    const statesKey = JSON.stringify(states);
+    const labelsKey = JSON.stringify(labels);
     const { series, outside, has } = useMemo(() => {
       const has = datasets.some((d) =>
         d.diagnostics?.some((m) => fields.some((k) => diagnosticValue(m[k], valueScale, logarithmic) !== null)),
@@ -111,18 +114,9 @@ export const DiagnosticChart = memo(
         }),
       );
       return { series, outside, has };
-      // Keys stand in for bounds, states and labels, which callers often pass as fresh literals.
+      // Keys stand in for fields, bounds, states and labels, which callers often pass as fresh literals.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [
-      datasets,
-      fields.join('|'),
-      valueScale,
-      logarithmic,
-      boundsKey,
-      JSON.stringify(states),
-      JSON.stringify(labels),
-      detail,
-    ]);
+    }, [datasets, fieldsKey, valueScale, logarithmic, boundsKey, statesKey, labelsKey, detail]);
     if (!has) return <NoData text="该日志未提供这些诊断值，保留未知" />;
     return (
       <>

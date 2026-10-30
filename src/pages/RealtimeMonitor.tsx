@@ -1,9 +1,12 @@
 import SatelliteDetails from '../components/SatelliteDetails';
 import { realtimeDisplay } from '../services/realtime-display';
-import { utcAxisLabel, utcRangeSummary } from '../time';
+import { utcRangeSummary } from '../time';
 import { sessionName } from '../services/session-names';
-import { realtimeEditors as editors } from '../services/realtime-drafts';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { realtimeEditors as editors, defaults, manualSource, realtimeDraftRequest } from '../services/realtime-drafts';
+import { componentNames, definitions, formatBytes, roleNames, stateNames, streamLabel, val } from './realtime/format';
+import { RecordingMonitor } from './realtime/RecordingMonitor';
+import { MetricHistory } from './realtime/MetricHistory';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   App,
@@ -21,24 +24,14 @@ import {
   Tooltip,
   Segmented,
 } from 'antd';
-import { CaretRightOutlined, FolderOpenOutlined, PauseOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
-import type {
-  RealtimeDocument,
-  RealtimeMetrics,
-  RealtimeProduct,
-  RealtimeSnapshot,
-  RealtimeStream,
-  RuntimePaths,
-  RealtimeRequest,
-  ResultSet,
-} from '../../contracts';
-import { Chart, EnuChart } from '../components/Charts';
+import { CaretRightOutlined, PauseOutlined, SaveOutlined, UploadOutlined } from '@ant-design/icons';
+import type { RealtimeDocument, RealtimeProduct, RealtimeSnapshot, RuntimePaths, ResultSet } from '../../contracts';
+import { EnuChart } from '../components/Charts';
 import { Metric, NoData, PageHeading, Panel, SolutionTag } from '../components/common';
 import { exportText, isDesktop } from '../services/files';
 import { readStored, writeStored } from '../services/storage';
 import { useOptDrop } from '../services/opt-drop';
 import { PathInput } from '../components/PathInput';
-import { fileColors } from '../components/chart-data';
 import { defaultConfig } from '../domain';
 import { timeRows, geometryDiagnostics, diagnosticsCsv } from '../diagnostics';
 import { AtmosphereDiagnostics } from '../components/AtmosphereDiagnostics';
@@ -51,298 +44,6 @@ import {
   EpochInspector,
   DiagnosticPanel,
 } from '../components/SolverDiagnostics';
-
-const manualSource = 'findyou-live-draft:';
-const defaults: Record<string, string> = {
-  GNSS_PMode: '3',
-  GNSS_RoveSampleTime: '1.0',
-  GNSS_ARMode: '2',
-  PRODUCT_NTRIP_Type: 'SSR',
-  ROVE_NTRIP_Format: 'RTCM3',
-  BASE_NTRIP_Format: 'RTCM3',
-  NTRIP_RequestMode: 'V2',
-  GNSS_bUsePPPAntenna: 'ON',
-  GNSS_bRecordRTCM3: 'OFF',
-  GNSS_bOutputNMEA: 'ON',
-  GNSS_bOutputULog: 'ON',
-  GNSS_bOutputLOG: 'ON',
-  IPSClient_bStatusLog: 'ON',
-  GNSS_ULogLevel: 'INFO',
-  BASE_NTRIP_Port: '2101',
-  BASE_NTRIP_DataType: 'OBS|EPH',
-  ROVE_NTRIP_Port: '2101',
-  PRODUCT_NTRIP_Port: '2101',
-  BIAS_NTRIP_Port: '2101',
-  ATMO_NTRIP_Port: '2101',
-  ROVE_NTRIP_DataType: 'OBS|EPH',
-  PRODUCT_NTRIP_DataType: 'EPH|ORB|CLK|CODE_OSB|PHASE_OSB|TROP|ION',
-  BIAS_NTRIP_DataType: 'CODE_OSB|PHASE_OSB',
-  ATMO_NTRIP_DataType: 'TROP|ION',
-};
-// Credentials survive page switches only in memory. Persistent preferences deliberately exclude them.
-export function seedRealtimeDraft(key: string, doc: RealtimeDocument, label = sessionName(doc.name, 1)) {
-  editors.set(key, {
-    document: {
-      ...doc,
-      values: {
-        ...defaults,
-        ...doc.values,
-        ...(doc.values.GNSS_PMode === '0' ? { GNSS_bRecordRTCM3: 'ON' } : {}),
-        ...(!['6', '7', '8'].includes(doc.values.GNSS_PMode) && ['HAS', 'B2B'].includes(doc.values.PRODUCT_NTRIP_Type)
-          ? { GNSS_ARMode: '0' }
-          : {}),
-        ...(doc.values.PRODUCT_NTRIP_Type === 'B2B' && !doc.values.ROVE_NTRIP_Format
-          ? { ROVE_NTRIP_Format: 'UNICORE' }
-          : {}),
-      },
-    },
-    output: '',
-    label,
-    station: doc.values.ROVE_NTRIP_Mountpoint || '未指定测站',
-  });
-}
-export async function realtimeDraftRequest(key: string): Promise<RealtimeRequest | null> {
-  const e = editors.get(key);
-  if (!e?.document) return null;
-  if (e.document.sourcePath.startsWith(manualSource))
-    e.document = await invoke<RealtimeDocument>('create_live_document', { values: e.document.values });
-  return {
-    sourcePath: e.document.sourcePath,
-    values: e.document.values,
-    outputDir: e.output,
-    label: e.label,
-    station: e.station,
-  };
-}
-
-const stateNames = {
-  idle: '尚未启动',
-  starting: '正在启动',
-  running: '实时运行',
-  stopping: '正在停止',
-  stopped: '已停止',
-  failed: '会话失败',
-};
-const componentNames = { orbit: '轨道', clock: '钟差', code: '码偏差 / OSB', phase: '相位偏差 / OSB' };
-const roleNames: Record<string, string> = {
-  BASE: '基站观测流',
-  ROVE: '观测流',
-  PROD: '主产品流',
-  PRODUCT: '主产品流',
-  BIAS: '独立偏差流',
-  ATMO: '大气流',
-};
-function formatBytes(n: number) {
-  return n >= 1048576 ? `${(n / 1048576).toFixed(2)} MiB` : n >= 1024 ? `${(n / 1024).toFixed(1)} KiB` : `${n} B`;
-}
-function RecordingMonitor({
-  live,
-  rates,
-  now,
-  active,
-  sessionKey,
-}: {
-  live?: RealtimeSnapshot;
-  rates: Record<string, number>;
-  now: number;
-  active: boolean;
-  sessionKey?: string;
-}) {
-  const { message } = App.useApp();
-  return (
-    <div className="recording-monitor">
-      <Alert
-        showIcon
-        type="info"
-        title="仅录制原始数据 · 不执行定位解算"
-        description="启用的挂载点分别保存原始字节，不要求观测与产品配对。此模式不解码卫星或产品，不生成 ENU、AR 和残差结果。"
-      />
-      <div className="stream-cards">
-        {live?.heartbeat?.streams?.length ? (
-          live.heartbeat.streams.map((s) => {
-            const status = streamLabel(s, now, active);
-            return (
-              <section className="stream-card" key={s.role}>
-                <header>
-                  <strong>{roleNames[s.role] ?? s.role}</strong>
-                  <Tag color={status.color}>{status.label}</Tag>
-                </header>
-                <div className="stream-rate">
-                  {((rates[s.role] ?? 0) / 1024).toFixed(2)}
-                  <small>KiB / s</small>
-                </div>
-                <dl>
-                  <dt>累计接收</dt>
-                  <dd>{formatBytes(s.bytes)}</dd>
-                  <dt>最近到达</dt>
-                  <dd>{s.lastArrival ? new Date(s.lastArrival * 1000).toISOString().slice(11, 19) + ' UTC' : '—'}</dd>
-                  <dt>连接尝试</dt>
-                  <dd>{s.attempts ?? s.reconnects}</dd>
-                </dl>
-              </section>
-            );
-          })
-        ) : (
-          <Panel title="等待连接">
-            <NoData text="在数据源与配置中选择模式 0，填写至少一路挂载点后开始录制" />
-          </Panel>
-        )}
-      </div>
-      <Panel
-        title="本地原始文件"
-        extra={
-          <Button
-            icon={<FolderOpenOutlined />}
-            disabled={!live?.outputDir || !isDesktop()}
-            onClick={() =>
-              void invoke('open_live_folder', { sessionId: sessionKey ?? null }).catch((e) => message.error(String(e)))
-            }
-          >
-            打开会话目录
-          </Button>
-        }
-      >
-        <Table
-          size="small"
-          rowKey="path"
-          pagination={false}
-          dataSource={live?.recordingFiles ?? []}
-          columns={[
-            { title: '数据源', dataIndex: 'role', width: 150, render: (r: string) => roleNames[r] ?? r },
-            {
-              title: '文件名',
-              dataIndex: 'name',
-              ellipsis: true,
-              render: (name: string, r) => (
-                <Tooltip title={r.path}>
-                  <span className="mono">{name}</span>
-                </Tooltip>
-              ),
-            },
-            { title: '文件大小', dataIndex: 'bytes', width: 150, render: formatBytes },
-          ]}
-          locale={{ emptyText: '接收到数据后显示录制文件' }}
-        />
-        <div className="chart-note">
-          接收量与磁盘大小可能因写入缓冲暂时不同；正常停止会刷新文件。文件扩展名沿用 IPSClient
-          规则，内容保持源流原始格式。文件按会话隔离，移除界面记录不会删除磁盘文件。
-        </div>
-      </Panel>
-    </div>
-  );
-}
-const definitions: Record<string, string> = {
-  Obs: '观测卫星数',
-  OC: '轨道钟差支持卫星数（配置排除后，高度角筛选前）',
-  FloIn: '进入观测更新的卫星数',
-  FloUse: '被接受更新所用卫星数',
-  HDOP: '浮点解水平 DOP',
-  VDOP: '浮点解垂直 DOP',
-  FPRMS: '浮点后验伪距残差 RMS / m',
-  FLRMS: '浮点后验载波残差 RMS / m',
-  PNRMS: '伪距标准化后验残差 RMS',
-  LNRMS: '载波标准化后验残差 RMS',
-  FltR: '滤波重置',
-  AmbR: '本历元初始化或重置的模糊度弧数',
-  SlS: '周跳卫星数',
-  SlL: '周跳信号数',
-  Disc: '相位偏差不连续计数',
-  Ratio: '本历元有效整数搜索 Ratio；不等同于已确认固定',
-  FixS: '已确认固定的目标卫星数，不含参考端点',
-  FixA: '已确认独立模糊度约束数',
-  CanS: '至少一个频率通过现有检查的 AR 候选卫星数',
-  ADOP: '模糊度 DOP / cycle',
-  AHDOP: '固定解水平 DOP',
-  AVDOP: '固定解垂直 DOP',
-};
-function val(m: RealtimeMetrics | null | undefined, k: string, d = 0) {
-  const v = m?.[k];
-  return typeof v === 'number' && v >= 0 ? v.toFixed(d) : '—';
-}
-function streamLabel(s: RealtimeStream, now: number, active: boolean) {
-  if (!active) return { label: '会话已停止', color: 'default' };
-  if (s.state === 1) return { label: '连接中', color: 'processing' };
-  if (s.state !== 2)
-    return {
-      label: s.state === 3 ? (s.httpStatus ? '响应拒绝 · HTTP ' + s.httpStatus : '连接异常') : '等待重连',
-      color: 'error',
-    };
-  if (!s.lastArrival) return { label: '已连接 · 等待数据', color: 'warning' };
-  if (now - s.lastArrival > 10) return { label: '接收停滞', color: 'warning' };
-  return { label: '正在接收', color: 'success' };
-}
-const MetricHistory = memo(
-  function MetricHistory({
-    history,
-    keys,
-    label,
-    unit,
-  }: {
-    history: RealtimeMetrics[];
-    keys: string[];
-    label: string;
-    unit: string;
-  }) {
-    const available = history.some((m) => keys.some((k) => typeof m[k] === 'number'));
-    if (!available)
-      return (
-        <>
-          <NoData text={history.length ? '日志已读取，当前未提供这些诊断值' : '等待逐历元诊断日志'} />
-          <div className="chart-note">{keys.join(' / ')} · 未提供的值不会填成 0</div>
-        </>
-      );
-    return (
-      <div>
-        <Chart
-          height={230}
-          label={label}
-          option={{
-            animation: false,
-            color: fileColors,
-            textStyle: { color: '#98abc6', fontSize: 12 },
-            legend: { top: 10, textStyle: { color: '#b6c5da' } },
-            tooltip: { trigger: 'axis' },
-            grid: { left: 58, right: 22, top: 44, bottom: 35 },
-            xAxis: { type: 'time', axisLabel: { formatter: utcAxisLabel } },
-            yAxis: {
-              type: 'value',
-              name: unit,
-              scale: true,
-              splitLine: { lineStyle: { color: '#2b374a', type: 'dashed' } },
-            },
-            series: keys.map((k) => ({
-              name:
-                (
-                  {
-                    orbit: '轨道',
-                    clock: '钟差',
-                    code: '码偏差',
-                    phase: '相位偏差',
-                    orbitAge: '轨道',
-                    clockAge: '钟差',
-                    codeAge: '码偏差',
-                    phaseAge: '相位偏差',
-                  } as Record<string, string>
-                )[k] ?? k,
-              type: 'line',
-              showSymbol: history.length < 3,
-              connectNulls: false,
-              showAllSymbol: history.length < 3,
-              symbolSize: 5,
-              data: history.map((m) => [Date.parse(m.time), typeof m[k] === 'number' ? m[k] : null]),
-            })),
-          }}
-        />
-        <div className="chart-note">
-          {keys.map((k) => `${k}: ${val(history.at(-1), k, ['HDOP', 'VDOP'].includes(k) ? 3 : 0)}`).join(' · ')} · —
-          为算法未提供
-        </div>
-      </div>
-    );
-  },
-  (a, b) =>
-    a.history === b.history && a.keys.join('|') === b.keys.join('|') && a.label === b.label && a.unit === b.unit,
-);
 
 export default function RealtimeMonitor({
   snapshot,
@@ -486,9 +187,10 @@ export default function RealtimeMonitor({
     [model, domain],
   );
   const diagnosticResults = useMemo(() => [visible], [visible]);
+  const inspecting = inspectAt !== null;
   const inspectorResults = useMemo(
-    () => (inspectAt === null ? [] : diagnosticResults.map(geometryDiagnostics)),
-    [diagnosticResults, inspectAt === null],
+    () => (inspecting ? diagnosticResults.map(geometryDiagnostics) : []),
+    [diagnosticResults, inspecting],
   );
   const diagProps = {
     results: diagnosticResults,
@@ -561,8 +263,10 @@ export default function RealtimeMonitor({
       setBusy(false);
     }
   };
+  // Load the session's OPT once when a session without a draft is opened; later edits must not re-trigger it.
   useEffect(() => {
     if (sessionKey && !editor.document && snapshot?.sourcePath) void load(snapshot.sourcePath, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionKey, snapshot?.sourcePath]);
   const { ref: dropRef, dragging } = useOptDrop(async (paths) => {
     if (active) {

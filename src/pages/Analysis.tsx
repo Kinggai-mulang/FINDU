@@ -115,7 +115,10 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
     setPreferences(next);
     writeStored('analysisPreferences', next);
   };
-  const reference = settings.useReference ? validReference(settings.referenceText) : null;
+  const reference = useMemo(
+    () => (settings.useReference ? validReference(settings.referenceText) : null),
+    [settings.useReference, settings.referenceText],
+  );
   const referenceLabel = reference ? '独立参考误差' : '共用原点相对位置';
   const live = active.some((r) => r.isLiveCache);
   // Realtime buffers (≤ 3600 epochs) are always drawn in full; the switch appears only for long results.
@@ -155,12 +158,10 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
       }),
     [
       active,
-      range.start,
-      range.end,
+      range,
       cohort,
       baselineId,
-      settings.referenceText,
-      settings.useReference,
+      reference,
       settings.motion,
       settings.horizontal,
       settings.vertical,
@@ -185,9 +186,10 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
     [analysis.projected, diagnosticMode, cohort],
   );
   const diagnosticProps = { results: diagnosticResults, timeDomain: range, onTimeRange, onInspect: setInspectAt };
+  const selectedKey = selected.join('|');
   useEffect(() => {
     setInspectAt(null);
-  }, [currentGroup, diagnosticMode, selected.join('|')]);
+  }, [currentGroup, diagnosticMode, selectedKey]);
   useEffect(() => {
     if (diagnosticMode === 'RTK' && ['atmosphere', 'products'].includes(tab)) setTab('base');
     if (diagnosticMode === 'PPP' && ['base', 'sources'].includes(tab)) setTab('atmosphere');
