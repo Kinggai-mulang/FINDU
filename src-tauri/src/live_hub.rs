@@ -1,5 +1,5 @@
 use crate::{
-    realtime::{LiveRequest, LiveSnapshot, RealtimeRuntime},
+    realtime::{DeltaRequest, LiveDelta, LiveRequest, LiveSnapshot, RealtimeRuntime},
     results::RealResult,
 };
 use std::{
@@ -60,6 +60,18 @@ impl LiveHub {
     }
     pub fn overview(&self) -> Vec<LiveSnapshot> {
         self.sessions.lock().unwrap().values().map(RealtimeRuntime::summary).collect()
+    }
+    /// Incremental buffers for the detail view and live comparisons; removed sessions are omitted.
+    pub fn deltas(&self, requests: &[DeltaRequest]) -> Result<Vec<LiveDelta>, String> {
+        let limit = crate::native::capacity::LIMITS.comparison_results + 1;
+        if requests.len() > limit {
+            return Err(format!("一次最多读取 {limit} 路实时缓冲"));
+        }
+        let sessions = self.sessions.lock().unwrap();
+        Ok(requests
+            .iter()
+            .filter_map(|r| sessions.get(&r.session_id).map(|rt| rt.delta(r.cursor.as_ref(), r.with_logs)))
+            .collect())
     }
     pub fn stop(&self, key: Option<&str>) -> Result<(), String> {
         self.runtime(key)?.stop();

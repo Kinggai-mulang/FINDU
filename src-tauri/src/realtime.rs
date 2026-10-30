@@ -116,7 +116,112 @@ pub struct LiveSnapshot {
     pub product_log_path: Option<String>,
     pub status_error: Option<String>,
     pub recording_files: Vec<RecordingFile>,
+    /// Bumped whenever a buffer is cleared inside one run, so clients discard their copies.
+    #[serde(skip)]
+    pub generation: u64,
+    /// Items ever appended to each buffer in this generation; the oldest kept item is `end - len`.
+    #[serde(skip)]
+    pub ends: BufferEnds,
 }
+
+/// Total items appended per live buffer; these are sequence numbers, not lengths.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BufferEnds {
+    pub epochs: u64,
+    pub history: u64,
+    pub products: u64,
+    pub logs: u64,
+}
+
+/// What a client already holds for one session.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveCursor {
+    pub run_id: String,
+    pub generation: u64,
+    pub ends: BufferEnds,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeltaRequest {
+    pub session_id: String,
+    pub cursor: Option<LiveCursor>,
+    #[serde(default)]
+    pub with_logs: bool,
+}
+
+/// Items with sequence numbers `from..end`; the client keeps its own items below `from`
+/// and drops everything below `start`, which mirrors the server buffer exactly.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BufferSlice<T> {
+    pub start: u64,
+    pub from: u64,
+    pub end: u64,
+    pub items: Vec<T>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveDelta {
+    /// History-free session state, identical to one overview row.
+    pub summary: LiveSnapshot,
+    pub generation: u64,
+    pub epochs: BufferSlice<RealEpoch>,
+    pub history: BufferSlice<Value>,
+    pub product_history: BufferSlice<Value>,
+    pub logs: BufferSlice<Value>,
+}
+
+/// The last held item is always resent, because product rows may be replaced in place.
+fn slice<T: Clone>(items: &[T], end: u64, held: Option<u64>) -> BufferSlice<T> {
+    let start = end - items.len() as u64;
+    let from = match held {
+        Some(h) if h > start && h <= end => h - 1,
+        _ => start,
+    };
+    BufferSlice { start, from, end, items: items[(from - start) as usize..].to_vec() }
+}
+
+/// History-free copy of one session for overviews and delta headers.
+fn summary_of(d: &LiveSnapshot) -> LiveSnapshot {
+    LiveSnapshot {
+        session_key: d.session_key.clone(),
+        label: d.label.clone(),
+        station: d.station.clone(),
+        source_path: d.source_path.clone(),
+        buffered_epochs: d.epochs.len(),
+        analysis_config: d.analysis_config.clone(),
+        state: d.state.clone(),
+        config_name: d.config_name.clone(),
+        product_type: d.product_type.clone(),
+        log_path: d.log_path.clone(),
+        parse_error: d.parse_error.clone(),
+        log_updated_at: d.log_updated_at.clone(),
+        epoch_interval_seconds: recent_epoch_interval(&d.history),
+        id: d.id.clone(),
+        started_at: d.started_at.clone(),
+        output_dir: d.output_dir.clone(),
+        process_id: d.process_id,
+        engine_commit: d.engine_commit.clone(),
+        heartbeat: d.heartbeat.clone(),
+        metrics: d.metrics.clone(),
+        error: d.error.clone(),
+        reference_xyz: d.reference_xyz,
+        received_epochs: d.received_epochs,
+        solution_mode: d.solution_mode.clone(),
+        log_version: d.log_version,
+        engine_build_id: d.engine_build_id.clone(),
+        ntrip_log_path: d.ntrip_log_path.clone(),
+        product_log_path: d.product_log_path.clone(),
+        status_error: d.status_error.clone(),
+        recording_files: d.recording_files.clone(),
+        ..Default::default()
+    }
+}
+
 /// Median epoch spacing also travels in the history-free overview.
 fn recent_epoch_interval(history: &[Value]) -> Option<f64> {
     let tail = &history[history.len().saturating_sub(21)..];
@@ -131,6 +236,72 @@ fn recent_epoch_interval(history: &[Value]) -> Option<f64> {
         .collect();
     steps.sort_by(f64::total_cmp);
     (steps.len() >= 2).then(|| steps[(steps.len() - 1) / 2])
+}
+
+#[cfg(test)]
+mod delta_tests {
+    use super::*;
+    fn push(rt: &RealtimeRuntime, n: u64) {
+        let mut d = rt.data.lock().unwrap();
+        for _ in 0..n {
+            let i = d.ends.history;
+            d.history.push(json!({ "i": i }));
+            d.ends.history += 1;
+            if d.history.len() > 3600 {
+                d.history.remove(0);
+            }
+        }
+    }
+    fn cursor(delta: &LiveDelta, run: &str) -> LiveCursor {
+        LiveCursor {
+            run_id: run.into(),
+            generation: delta.generation,
+            ends: BufferEnds {
+                epochs: delta.epochs.end,
+                history: delta.history.end,
+                products: delta.product_history.end,
+                logs: delta.logs.end,
+            },
+        }
+    }
+    #[test]
+    fn first_read_is_full_then_only_new_rows_plus_the_last_held_one() {
+        let rt = RealtimeRuntime::new(PathBuf::new(), PathBuf::new());
+        rt.data.lock().unwrap().id = "run".into();
+        push(&rt, 10);
+        let full = rt.delta(None, false);
+        assert_eq!((full.history.start, full.history.from, full.history.end), (0, 0, 10));
+        assert_eq!(full.history.items.len(), 10);
+        assert!(full.summary.history.is_empty() && full.summary.epochs.is_empty());
+        push(&rt, 3);
+        let next = rt.delta(Some(&cursor(&full, "run")), false);
+        assert_eq!((next.history.from, next.history.end), (9, 13));
+        assert_eq!(next.history.items[0]["i"], 9);
+        assert_eq!(next.history.items.len(), 4);
+    }
+    #[test]
+    fn rollover_new_run_and_generation_change_resend_the_buffer() {
+        let rt = RealtimeRuntime::new(PathBuf::new(), PathBuf::new());
+        rt.data.lock().unwrap().id = "run".into();
+        push(&rt, 3600);
+        let held = cursor(&rt.delta(None, false), "run");
+        push(&rt, 4000);
+        let behind = rt.delta(Some(&held), false);
+        assert_eq!((behind.history.start, behind.history.from, behind.history.end), (4000, 4000, 7600));
+        assert_eq!(behind.history.items.len(), 3600);
+        let other_run = rt.delta(Some(&cursor(&behind, "previous")), false);
+        assert_eq!(other_run.history.items.len(), 3600);
+        rt.data.lock().unwrap().generation += 1;
+        let cleared = rt.delta(Some(&cursor(&behind, "run")), false);
+        assert_eq!(cleared.history.from, cleared.history.start);
+    }
+    #[test]
+    fn logs_travel_only_when_requested() {
+        let rt = RealtimeRuntime::new(PathBuf::new(), PathBuf::new());
+        rt.log("one".into());
+        assert!(rt.delta(None, false).logs.items.is_empty());
+        assert_eq!(rt.delta(None, true).logs.items.len(), 1);
+    }
 }
 
 #[cfg(test)]
@@ -271,39 +442,24 @@ impl RealtimeRuntime {
     }
     /// Overview never copies histories; four live sessions need only one full detail poll.
     pub fn summary(&self) -> LiveSnapshot {
+        summary_of(&self.data.lock().unwrap())
+    }
+    /// Only the items the client lacks, so a 1 s poll costs the same after one hour as after one minute.
+    pub fn delta(&self, cursor: Option<&LiveCursor>, with_logs: bool) -> LiveDelta {
         let d = self.data.lock().unwrap();
-        LiveSnapshot {
-            session_key: d.session_key.clone(),
-            label: d.label.clone(),
-            station: d.station.clone(),
-            source_path: d.source_path.clone(),
-            buffered_epochs: d.epochs.len(),
-            analysis_config: d.analysis_config.clone(),
-            state: d.state.clone(),
-            config_name: d.config_name.clone(),
-            product_type: d.product_type.clone(),
-            log_path: d.log_path.clone(),
-            parse_error: d.parse_error.clone(),
-            log_updated_at: d.log_updated_at.clone(),
-            epoch_interval_seconds: recent_epoch_interval(&d.history),
-            id: d.id.clone(),
-            started_at: d.started_at.clone(),
-            output_dir: d.output_dir.clone(),
-            process_id: d.process_id,
-            engine_commit: d.engine_commit.clone(),
-            heartbeat: d.heartbeat.clone(),
-            metrics: d.metrics.clone(),
-            error: d.error.clone(),
-            reference_xyz: d.reference_xyz,
-            received_epochs: d.received_epochs,
-            solution_mode: d.solution_mode.clone(),
-            log_version: d.log_version,
-            engine_build_id: d.engine_build_id.clone(),
-            ntrip_log_path: d.ntrip_log_path.clone(),
-            product_log_path: d.product_log_path.clone(),
-            status_error: d.status_error.clone(),
-            recording_files: d.recording_files.clone(),
-            ..Default::default()
+        let held = cursor.filter(|c| c.run_id == d.id && c.generation == d.generation).map(|c| c.ends);
+        let logs = if with_logs {
+            slice(&d.logs, d.ends.logs, held.map(|h| h.logs))
+        } else {
+            BufferSlice { start: d.ends.logs, from: d.ends.logs, end: d.ends.logs, items: vec![] }
+        };
+        LiveDelta {
+            summary: summary_of(&d),
+            generation: d.generation,
+            epochs: slice(&d.epochs, d.ends.epochs, held.map(|h| h.epochs)),
+            history: slice(&d.history, d.ends.history, held.map(|h| h.history)),
+            product_history: slice(&d.product_history, d.ends.products, held.map(|h| h.products)),
+            logs,
         }
     }
     pub fn stop(&self) {
@@ -316,6 +472,7 @@ impl RealtimeRuntime {
     fn log(&self, line: String) {
         let mut d = self.data.lock().unwrap();
         d.logs.push(json!({"time":Utc::now().to_rfc3339(),"line":line}));
+        d.ends.logs += 1;
         if d.logs.len() > 500 {
             d.logs.remove(0);
         }
@@ -471,8 +628,11 @@ impl RealtimeRuntime {
     fn product_metric(&self, snapshot: &Value) {
         if let Some(metric) = results::product_metric(snapshot) {
             let mut d = self.data.lock().unwrap();
+            // A replaced last row keeps its sequence number; deltas always resend the last held row.
             if d.product_history.last().is_some_and(|m| m["time"] == metric["time"]) {
                 d.product_history.pop();
+            } else {
+                d.ends.products += 1;
             }
             d.product_history.push(metric);
             if d.product_history.len() > 3600 {
@@ -579,7 +739,10 @@ impl RealtimeRuntime {
                     let (reset, lines) = product_tail.read(path)?;
                     if reset {
                         product = crate::status_log::Parser::new("PRODUCT");
-                        self.data.lock().unwrap().product_history.clear();
+                        let mut d = self.data.lock().unwrap();
+                        d.product_history.clear();
+                        d.ends.products = 0;
+                        d.generation += 1;
                     }
                     for line in lines {
                         if let Some(previous) = product.line(&line)? {
@@ -616,6 +779,9 @@ impl RealtimeRuntime {
                     let mut d = self.data.lock().unwrap();
                     d.epochs.clear();
                     d.history.clear();
+                    d.ends.epochs = 0;
+                    d.ends.history = 0;
+                    d.generation += 1;
                     d.reference_xyz = None;
                     d.received_epochs = 0;
                     d.metrics = Value::Null;
@@ -630,12 +796,14 @@ impl RealtimeRuntime {
                             d.parse_error = None;
                             d.log_updated_at = Some(Utc::now().to_rfc3339());
                             d.history.push(metrics);
+                            d.ends.history += 1;
                             d.received_epochs += 1;
                             if d.history.len() > 3600 {
                                 d.history.remove(0);
                             }
                             if let Some(e) = epoch {
                                 d.epochs.push(e);
+                                d.ends.epochs += 1;
                                 if d.epochs.len() > 3600 {
                                     d.epochs.remove(0);
                                 }

@@ -271,6 +271,35 @@ async function installRealtimeServer(sessions) {
       realtime_overview: () => [...server.sessions.values()].map((s) => snapshot(s, false)),
       realtime_snapshot: (body) => snapshot(server.sessions.get(body.sessionId), true),
       realtime_results: (body) => body.ids.map((id) => result(server.sessions.get(id))),
+      // Incremental protocol (0.8.1+): same rules as `slice` in realtime.rs.
+      realtime_deltas: (body) =>
+        body.requests.flatMap(({ sessionId, cursor, withLogs }) => {
+          const s = server.sessions.get(sessionId);
+          if (!s) return [];
+          const held =
+            cursor && cursor.runId === `run-${s.spec.key}` && cursor.generation === 0 ? cursor.ends : undefined;
+          const slice = (items, end, h) => {
+            const start = end - items.length;
+            const from = h !== undefined && h > start && h <= end ? h - 1 : start;
+            return { start, from, end, items: items.slice(from - start) };
+          };
+          const logs = Array.from({ length: 200 }, (_, i) => ({
+            time: nowIso(),
+            line: `perf log line ${s.next - 200 + i}`,
+          }));
+          return [
+            {
+              summary: snapshot(s, false),
+              generation: 0,
+              epochs: slice(s.epochs, s.next, held?.epochs),
+              history: slice(s.history, s.next, held?.history),
+              productHistory: { start: 0, from: 0, end: 0, items: [] },
+              logs: withLogs
+                ? slice(logs, s.next, held?.logs)
+                : { start: s.next, from: s.next, end: s.next, items: [] },
+            },
+          ];
+        }),
     };
     const original = (window.__perfFetch ??= window.fetch.bind(window));
     window.fetch = async (input, init) => {

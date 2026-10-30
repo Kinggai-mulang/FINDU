@@ -105,7 +105,7 @@ await page.evaluate((f) => {
   window.fetch = async (input, init) => {
     const url = typeof input === 'string' ? input : input.url;
     const cmd = url?.startsWith('http://ipc.localhost/') ? new URL(url).pathname.slice(1) : '';
-    if (!['realtime_overview', 'realtime_snapshot', 'import_realtime'].includes(cmd)) return original(input, init);
+    if (!['realtime_overview', 'realtime_deltas', 'import_realtime'].includes(cmd)) return original(input, init);
     const f = structuredClone(window.testFixture);
     if (!window.testFreeze) {
       f.logUpdatedAt = new Date().toISOString();
@@ -114,13 +114,25 @@ await page.evaluate((f) => {
     }
     if (window.testFlow)
       f.heartbeat.streams[0].bytes = 2048 + Math.floor((Date.now() - window.testFlowStart) / 1000) * 1024;
-    if (cmd === 'realtime_snapshot') window.testLastReturned = f;
+    if (cmd === 'realtime_deltas') window.testLastReturned = f;
+    // A new generation on every read makes the client take the whole fixture, which this test rewrites freely.
+    const full = (items) => ({ start: 0, from: 0, end: items.length, items });
+    const summary = { ...f, history: [], epochs: [], productHistory: [], logs: [] };
     const body =
       cmd === 'realtime_overview'
-        ? [{ ...f, history: [], epochs: [], productHistory: [], logs: [] }]
+        ? [summary]
         : cmd === 'import_realtime'
           ? { sourcePath: f.sourcePath, name: f.configName, values: f.analysisConfig }
-          : f;
+          : [
+              {
+                summary,
+                generation: (window.testGeneration = (window.testGeneration ?? 0) + 1),
+                epochs: full(f.epochs),
+                history: full(f.history),
+                productHistory: full(f.productHistory),
+                logs: full(f.logs),
+              },
+            ];
     return new Response(JSON.stringify(body), {
       headers: { 'Content-Type': 'application/json', 'Tauri-Response': 'ok' },
     });

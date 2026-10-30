@@ -108,13 +108,6 @@ fn stop_realtime(
     runtime.stop(session_id.as_deref())
 }
 #[tauri::command]
-fn realtime_snapshot(
-    session_id: Option<String>,
-    runtime: tauri::State<'_, live_hub::LiveHub>,
-) -> Result<realtime::LiveSnapshot, String> {
-    runtime.snapshot(session_id.as_deref())
-}
-#[tauri::command]
 fn realtime_overview(runtime: tauri::State<'_, live_hub::LiveHub>) -> Vec<realtime::LiveSnapshot> {
     runtime.overview()
 }
@@ -126,12 +119,13 @@ fn stop_all_realtime(runtime: tauri::State<'_, live_hub::LiveHub>) {
 fn remove_realtime(session_id: String, runtime: tauri::State<'_, live_hub::LiveHub>) -> Result<(), String> {
     runtime.remove(&session_id)
 }
+/// One batched, incremental read per second for the detail session and live comparisons.
 #[tauri::command]
-fn realtime_results(
-    ids: Vec<String>,
+fn realtime_deltas(
+    requests: Vec<realtime::DeltaRequest>,
     runtime: tauri::State<'_, live_hub::LiveHub>,
-) -> Result<Vec<results::RealResult>, String> {
-    runtime.results(&ids)
+) -> Result<Vec<realtime::LiveDelta>, String> {
+    runtime.deltas(&requests)
 }
 
 #[tauri::command]
@@ -259,7 +253,6 @@ fn main() {
             realtime::create_live_document,
             start_realtime,
             stop_realtime,
-            realtime_snapshot,
             realtime_satellites,
             runtime_paths,
             dismiss_native,
@@ -273,7 +266,7 @@ fn main() {
             realtime_overview,
             stop_all_realtime,
             remove_realtime,
-            realtime_results
+            realtime_deltas
         ])
         .build(context)
         .expect("FINDYOU desktop startup failed")
