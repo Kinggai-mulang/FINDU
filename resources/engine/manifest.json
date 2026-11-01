@@ -1,8 +1,8 @@
 {
-  "commit": "611e6c786200df7751ce477359ba3cbc0edcf8b0",
-  "build_id": "611e6c786200-source-d818643c07e450ce",
-  "source_modified": true,
-  "source_sha256": "d818643c07e450cebdcbf819af5b7fe90d418b143ede9ecf9d488e1d31d45bd5",
+  "commit": "991fadec2844afc1d6100fe2e0c93d7e70b70a07",
+  "build_id": "991fadec2844-source-bc945660ac6bb1a0",
+  "source_modified": false,
+  "source_sha256": "bc945660ac6bb1a083d45f317bb0faba28e0c30a9d3855fe9b33f9f87872aae8",
   "source_hash_method": "SHA-256 of sorted source relative path NUL content NUL (CMakeLists.txt and src C/C++ headers/sources)",
   "ipspos_version": "BetaV0.611",
   "protocols": {
@@ -10,12 +10,12 @@
     "client_status": 1
   },
   "capabilities": {
-    "observation_decode": 1,
-    "satellite_snapshot": 2
+    "observation_decode": 2,
+    "satellite_snapshot": 3
   },
-  "built_at_utc": "2026-10-30T00:40:51.159741+00:00",
+  "built_at_utc": "2026-11-01T06:09:53.328948+00:00",
   "platform": "windows-x64",
   "configuration": "Release",
-  "solver_sha256": "d0a4f9d350655d6f95cd2965b9681b75a1fd20bdebf4a1919cc219ca18d00b20",
-  "client_sha256": "f388b3339e58adbc525abb25972f2123119009dbbabecf2e1c5754b9633e3c26"
+  "solver_sha256": "d0024eacda544281754e7564d977b5e94c31949d8bf96ebf72f47faa52b89957",
+  "client_sha256": "129415a851eef64dd6038213672ee438e58d1c70d4ae8204d22b967e767d4cb9"
 }

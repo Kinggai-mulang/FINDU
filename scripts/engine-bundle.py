@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 FILES = ('IPSPOS.exe', 'IPSClient.exe', 'manifest.json')
+PROTOCOLS = {'gnss_log': 4, 'client_status': 1}
+# Optional engine outputs this FINDU reads (docs/ENGINE-UPDATE.md): PMode=0 summary schema 2 and
+# IPSClient_SatelliteFile with snapshot schema 2.
+CAPABILITIES = {'observation_decode': 2, 'satellite_snapshot': 3}
+SOURCE_SUFFIXES = {'.c', '.h', '.cpp', '.txt'}
 
 
 def sha(path):
@@ -20,10 +25,56 @@ def sha(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def source_files(repo):
+    files = [repo / 'CMakeLists.txt']
+    files += [p for p in (repo / 'src').rglob('*') if p.is_file() and p.suffix.lower() in SOURCE_SUFFIXES]
+    return sorted(files, key=lambda p: p.relative_to(repo).as_posix())
+
+
+def source_sha(repo):
+    """SHA-256 of sorted 'relative path NUL content NUL' over CMakeLists.txt and src C/C++ and .txt files."""
+    digest = hashlib.sha256()
+    for path in source_files(repo):
+        digest.update(path.relative_to(repo).as_posix().encode() + b'\0' + path.read_bytes() + b'\0')
+    return digest.hexdigest()
+
+
+def git(repo, *args):
+    import subprocess
+    return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def pack(repo, output):
+    """Collect a Release build of an IPSPOS checkout into an engine directory with its manifest."""
+    repo, output = Path(repo).resolve(), Path(output).resolve()
+    exes = {'IPSPOS.exe': repo / 'out/IPSPOS/Release/IPSPOS.exe', 'IPSClient.exe': repo / 'out/IPSClient/Release/IPSClient.exe'}
+    newest = max(p.stat().st_mtime for p in source_files(repo))
+    for name, exe in exes.items():
+        if not exe.is_file() or exe.stat().st_mtime < newest:
+            raise ValueError(f'{name} 缺失或早于源码修改，请先编译 Release')
+    version = re.search(r'#define\s+IPSPOSVERSION\s+"([^"]+)"', (repo / 'src/IPSDLL/BASEDLL/BaseSDC.h').read_text(encoding='utf-8'))
+    commit, source = git(repo, 'rev-parse', 'HEAD'), source_sha(repo)
+    if output.exists() and any(output.iterdir()):
+        raise ValueError('输出目录须为空')
+    output.mkdir(parents=True, exist_ok=True)
+    for name, exe in exes.items():
+        shutil.copy2(exe, output / name)
+    manifest = {'commit': commit, 'build_id': f'{commit[:12]}-source-{source[:16]}',
+                'source_modified': bool(git(repo, 'status', '--porcelain', '--', 'CMakeLists.txt', 'src')),
+                'source_sha256': source,
+                'source_hash_method': 'SHA-256 of sorted source relative path NUL content NUL (CMakeLists.txt and src C/C++ headers/sources)',
+                'ipspos_version': version[1], 'protocols': PROTOCOLS, 'capabilities': CAPABILITIES,
+                'built_at_utc': datetime.now(timezone.utc).isoformat(), 'platform': 'windows-x64',
+                'configuration': 'Release', 'solver_sha256': sha(output / 'IPSPOS.exe'),
+                'client_sha256': sha(output / 'IPSClient.exe')}
+    atomic_json(output / 'manifest.json', manifest)
+    return summary(check(output))
+
+
 def check(directory):
     directory = Path(directory).resolve()
     manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8-sig'))
-    if manifest.get('protocols') != {'gnss_log': 4, 'client_status': 1}:
+    if manifest.get('protocols') != PROTOCOLS:
         raise ValueError('需要 Log=4 / StatusLog=1；协议变化须先适配 FINDU')
     if not isinstance(manifest.get('build_id'), str) or not manifest['build_id'].strip():
         raise ValueError('缺少引擎 build_id')
@@ -159,9 +210,16 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     verify = sub.add_parser('check'); verify.add_argument('engine')
     update = sub.add_parser('install'); update.add_argument('engine'); update.add_argument('--app', required=True)
+    build = sub.add_parser('pack', help='由已编译的 IPSPOS 仓库生成候选 engine 目录')
+    build.add_argument('repo'); build.add_argument('output')
     args = parser.parse_args()
     try:
-        result = summary(check(args.engine)) if args.command == 'check' else install(args.engine, args.app)
+        if args.command == 'check':
+            result = summary(check(args.engine))
+        elif args.command == 'install':
+            result = install(args.engine, args.app)
+        else:
+            result = pack(args.repo, args.output)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, OSError) as error:
         parser.exit(1, f'引擎操作未完成：{error}\n')

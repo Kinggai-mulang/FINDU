@@ -64,6 +64,9 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 - Times are UTC everywhere (ISO strings on the wire, `Date.parse` once and cache). ENU in metres.
 - Engine protocol: only Log=4 and StatusLog=1. A protocol or option-semantics change in IPSPOS needs an adapter
   update in `gnss_log.rs` / `options.rs` first.
+- IPSPOS must not depend on FINDU. FINDU reads only general engine outputs; the two optional ones (PMode=0 decode
+  summary, `IPSClient_SatelliteFile`) are declared by manifest `capabilities` (`CAPABILITIES` in
+  `scripts/engine-bundle.py`). Never ask for IPSDLL changes for display needs; see `docs/ENGINE-UPDATE.md`.
 - Capacities come from `contracts/capacity.json` (16 realtime runs, 6 compared results, 32 post-processing jobs).
 - Credentials in realtime OPT files never go to logs, persistent storage or reports.
 
