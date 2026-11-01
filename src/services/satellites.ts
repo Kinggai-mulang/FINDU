@@ -7,8 +7,7 @@ export interface Satellite {
   signals: { slot: number; band: string; signal: string; cn0: number | null; used: boolean | null }[];
 }
 export interface SatelliteSnapshot {
-  schemaVersion: 1;
-  runId: string;
+  schemaVersion: 2;
   sequence: number;
   week: number;
   tow: number;

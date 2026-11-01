@@ -460,11 +460,6 @@ impl NativeRuntime {
             .stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
             .stderr(Stdio::from(stdout))
             .stdin(Stdio::null());
-        for (key, _) in std::env::vars_os() {
-            if key.to_string_lossy().starts_with("IPSPOS_DIAG_") {
-                command.env_remove(key);
-            }
-        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

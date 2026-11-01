@@ -129,9 +129,6 @@ function SatelliteLive({
       pending = false,
       lastPoll = -Infinity;
     setError('');
-    const release = () => {
-      void invoke('realtime_satellites', { sessionId: sessionKey, runId, enabled: false }).catch(() => {});
-    };
     const poll = async () => {
       const tick = performance.now();
       if (disposed || pending || document.hidden || !active || tick - lastPoll < 1000) return;
@@ -139,11 +136,7 @@ function SatelliteLive({
       pending = true;
       setNow(Date.now() / 1000);
       try {
-        const next = await invoke<SatelliteSnapshot | null>('realtime_satellites', {
-          sessionId: sessionKey,
-          runId,
-          enabled: true,
-        });
+        const next = await invoke<SatelliteSnapshot | null>('realtime_satellites', { sessionId: sessionKey, runId });
         if (!disposed) {
           setError('');
           if (next) setData((old) => (!old || next.sequence > old.sequence ? next : old));
@@ -152,12 +145,10 @@ function SatelliteLive({
         if (!disposed) setError(String(e));
       } finally {
         pending = false;
-        if (disposed || document.hidden) release();
       }
     };
     const visibility = () => {
-      if (document.hidden) release();
-      else void poll();
+      if (!document.hidden) void poll();
     };
     void poll();
     const timer = setInterval(() => void poll(), 1000);
@@ -166,7 +157,6 @@ function SatelliteLive({
       disposed = true;
       clearInterval(timer);
       document.removeEventListener('visibilitychange', visibility);
-      release();
     };
   }, [sessionKey, runId, active]);
   const stale = !active || !data || now - data.publishedAt > Math.max(3, 3 * sample);

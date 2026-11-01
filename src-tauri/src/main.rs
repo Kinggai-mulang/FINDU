@@ -172,11 +172,10 @@ fn open_folder(path: &std::path::Path) -> Result<(), String> {
 async fn realtime_satellites(
     session_id: String,
     run_id: String,
-    enabled: bool,
     hub: tauri::State<'_, live_hub::LiveHub>,
 ) -> Result<serde_json::Value, String> {
     let runtime = hub.runtime(Some(&session_id))?;
-    tauri::async_runtime::spawn_blocking(move || runtime.satellites(&run_id, enabled))
+    tauri::async_runtime::spawn_blocking(move || runtime.satellites(&run_id))
         .await
         .map_err(|e| e.to_string())?
 }

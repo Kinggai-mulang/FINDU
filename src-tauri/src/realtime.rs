@@ -568,6 +568,13 @@ impl RealtimeRuntime {
             run_text.push_str(&format!("GNSS_ATXFile = {};\n", options::engine_path(&p)?));
         }
         run_text.push_str(&format!("GNSS_ShareEPHPath = {};\nGNSS_bOutputLOG = ON;\nIPSClient_bStatusLog = ON;\nIPSClient_StopFile = {};\nRTIE_bSendSolDB = OFF;\nRTIE_bSiteInfoFromDB = OFF;\n",options::engine_path(&cache)?,options::engine_path(&stop_path)?));
+        // Satellite details are an ordinary IPSClient output; older engines ignore the unknown key.
+        if !record_only && manifest["capabilities"]["satellite_snapshot"] == SATELLITE_SNAPSHOT {
+            run_text.push_str(&format!(
+                "IPSClient_SatelliteFile = {};\n",
+                options::engine_path(&run.join("satellites.json"))?
+            ));
+        }
         if record_only {
             run_text.push_str("GNSS_bRecordRTCM3 = ON;\nGNSS_bOutputLOG = OFF;\nGNSS_bOutputNMEA = OFF;\nGNSS_bOutputAccuracy = OFF;\n");
         }
@@ -655,21 +662,6 @@ impl RealtimeRuntime {
             .current_dir(&run)
             .stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
             .stderr(Stdio::from(stdout));
-        for (k, _) in std::env::vars() {
-            if k.starts_with("IPSPOS_DIAG_") || k.starts_with("FINDYOU_") {
-                cmd.env_remove(k);
-            }
-        }
-        let manifest: Value = serde_json::from_slice(
-            &fs::read(self.engine_dir.join("manifest.json")).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let snapshot = self.data.lock().unwrap();
-        if snapshot.solution_mode != "RECORD" && manifest["capabilities"]["satellite_snapshot"] == 2 {
-            cmd.env("IPSPOS_DIAG_SATELLITE_DIR", options::engine_path(&run)?)
-                .env("IPSPOS_DIAG_SATELLITE_RUN_ID", &snapshot.id);
-        }
-        drop(snapshot);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -1124,19 +1116,13 @@ mod tests {
 }
 
 impl RealtimeRuntime {
-    pub fn satellites(&self, run_id: &str, enabled: bool) -> Result<Value, String> {
+    pub fn satellites(&self, run_id: &str) -> Result<Value, String> {
         let (id, state, directory) = {
             let d = self.data.lock().unwrap();
             (d.id.clone(), d.state.clone(), d.output_dir.clone())
         };
         if id != run_id || directory.is_empty() {
             return Err("会话已改变".into());
-        }
-        let root = Path::new(&directory);
-        let request = root.join("satellites.request");
-        if !enabled {
-            let _ = fs::remove_file(request);
-            return Ok(Value::Null);
         }
         if state != "running" {
             return Ok(Value::Null);
@@ -1145,11 +1131,10 @@ impl RealtimeRuntime {
             &fs::read(self.engine_dir.join("manifest.json")).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        if capability["capabilities"]["satellite_snapshot"] != 2 {
+        if capability["capabilities"]["satellite_snapshot"] != SATELLITE_SNAPSHOT {
             return Err("此引擎不支持卫星快照".into());
         }
-        fs::write(&request, (Utc::now().timestamp() + 5).to_string()).map_err(|e| e.to_string())?;
-        let file = root.join("satellites.json");
+        let file = Path::new(&directory).join("satellites.json");
         let Ok(meta) = fs::metadata(&file) else {
             return Ok(Value::Null);
         };
@@ -1167,13 +1152,15 @@ impl RealtimeRuntime {
             return Err("卫星快照超过大小限制".into());
         }
         let value: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-        validate_satellite_snapshot(&value, run_id)?;
+        validate_satellite_snapshot(&value)?;
         Ok(value)
     }
 }
-fn validate_satellite_snapshot(value: &Value, run_id: &str) -> Result<(), String> {
-    if value["schemaVersion"] != 1
-        || value["runId"] != run_id
+/// Engine capability for `IPSClient_SatelliteFile` (snapshot schemaVersion 2). Each run writes into its own
+/// directory, so the snapshot carries no run id.
+const SATELLITE_SNAPSHOT: u64 = 3;
+fn validate_satellite_snapshot(value: &Value) -> Result<(), String> {
+    if value["schemaVersion"] != 2
         || value["sequence"].as_u64().is_none_or(|n| n == 0)
         || value["week"].as_u64().is_none_or(|n| n > 9999)
         || value["publishedAt"].as_i64().is_none_or(|n| n <= 0 || n > Utc::now().timestamp() + 10)
@@ -1238,19 +1225,21 @@ fn validate_satellite_snapshot(value: &Value, run_id: &str) -> Result<(), String
 mod satellite_tests {
     use super::*;
     #[test]
-    fn rejects_partial_wrong_session_and_invalid_signal_snapshots() {
-        let valid = json!({"schemaVersion":1,"runId":"run","sequence":1,"week":2440,"tow":100.,"publishedAt":Utc::now().timestamp(),"satellites":[{"prn":"G01","system":"GPS","azimuth":null,"elevation":null,"used":null,"signals":[{"slot":0,"band":"L1","signal":"1C","cn0":null,"used":null}]}]});
-        assert!(validate_satellite_snapshot(&valid, "run").is_ok());
-        assert!(validate_satellite_snapshot(&valid, "other").is_err());
+    fn rejects_partial_old_and_invalid_signal_snapshots() {
+        let valid = json!({"schemaVersion":2,"sequence":1,"week":2440,"tow":100.,"publishedAt":Utc::now().timestamp(),"satellites":[{"prn":"G01","system":"GPS","azimuth":null,"elevation":null,"used":null,"signals":[{"slot":0,"band":"L1","signal":"1C","cn0":null,"used":null}]}]});
+        assert!(validate_satellite_snapshot(&valid).is_ok());
+        let mut v = valid.clone();
+        v["schemaVersion"] = json!(1);
+        assert!(validate_satellite_snapshot(&v).is_err());
         let mut v = valid.clone();
         v["satellites"][0]["signals"][0]["cn0"] = json!(999.);
-        assert!(validate_satellite_snapshot(&v, "run").is_err());
+        assert!(validate_satellite_snapshot(&v).is_err());
         let mut v = valid.clone();
         v["satellites"][0]["system"] = json!("BDS");
-        assert!(validate_satellite_snapshot(&v, "run").is_err());
+        assert!(validate_satellite_snapshot(&v).is_err());
         let mut v = valid.clone();
         v["satellites"].as_array_mut().unwrap().push(valid["satellites"][0].clone());
-        assert!(validate_satellite_snapshot(&v, "run").is_err());
-        assert!(validate_satellite_snapshot(&json!({"schemaVersion":1}), "run").is_err());
+        assert!(validate_satellite_snapshot(&v).is_err());
+        assert!(validate_satellite_snapshot(&json!({"schemaVersion":2})).is_err());
     }
 }

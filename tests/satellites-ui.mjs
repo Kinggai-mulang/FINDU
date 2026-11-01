@@ -14,8 +14,7 @@ await fs.writeFile(
 const fixture = process.argv[2]
   ? JSON.parse(await fs.readFile(process.argv[2], 'utf8'))
   : {
-      schemaVersion: 1,
-      runId: 'test',
+      schemaVersion: 2,
       sequence: 1,
       week: 2441,
       tow: 36000,
@@ -57,9 +56,7 @@ await page.addInitScript((snapshot) => {
   window.__TAURI_INTERNALS__ = {
     invoke: async (command, args) => {
       window.calls.push({ command, ...args, at: performance.now() });
-      return args.enabled
-        ? { ...snapshot, runId: 'run-test', sequence: window.calls.length, publishedAt: Date.now() / 1000 }
-        : null;
+      return { ...snapshot, sequence: window.calls.length, publishedAt: Date.now() / 1000 };
     },
   };
 }, fixture);
@@ -71,7 +68,7 @@ await page.getByRole('button', { name: '卫星详情页签' }).click();
 await page.getByText(new RegExp(`观测 ${fixture.satellites.length} 颗`)).waitFor();
 assert.equal(await page.locator('canvas').count(), 3);
 await page.waitForTimeout(2300);
-const calls = await page.evaluate(() => window.calls.filter((c) => c.enabled));
+const calls = await page.evaluate(() => window.calls);
 assert.ok(calls.length <= 4, 'updates must be capped at 1 Hz');
 assert.ok(calls.slice(1).every((c, i) => c.at - calls[i].at >= 900));
 await page.screenshot({ path: 'runtime/satellite-ui/overview.png', fullPage: true });
@@ -131,17 +128,13 @@ assert.ok(
   (await page.getByLabel('单颗卫星', { exact: true }).locator('..').textContent()).includes(sky.prn),
   'sky click must select satellite',
 );
-const enabledBeforeHide = await page.evaluate(() => {
+const callsBeforeHide = await page.evaluate(() => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: true });
   document.dispatchEvent(new Event('visibilitychange'));
-  return window.calls.filter((c) => c.enabled).length;
+  return window.calls.length;
 });
 await page.waitForTimeout(1300);
-assert.equal(
-  await page.evaluate(() => window.calls.filter((c) => c.enabled).length),
-  enabledBeforeHide,
-  'hidden page must stop polling',
-);
+assert.equal(await page.evaluate(() => window.calls.length), callsBeforeHide, 'hidden page must stop polling');
 await page.evaluate(() => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   document.dispatchEvent(new Event('visibilitychange'));
@@ -162,14 +155,9 @@ assert.ok(timing < 100, `signal chart P95 ${timing} ms`);
 await page.getByRole('button', { name: '卫星详情页签' }).click();
 await page.waitForTimeout(500);
 assert.equal(await page.locator('canvas').count(), 0, 'leaving the tab must dispose charts');
-const after = await page.evaluate(() => window.calls.filter((c) => c.enabled).length);
+const after = await page.evaluate(() => window.calls.length);
 await page.waitForTimeout(1200);
-assert.equal(
-  await page.evaluate(() => window.calls.filter((c) => c.enabled).length),
-  after,
-  'polling stopped after leaving the tab',
-);
-assert.ok(await page.evaluate(() => window.calls.some((c) => c.enabled === false)));
+assert.equal(await page.evaluate(() => window.calls.length), after, 'polling stopped after leaving the tab');
 assert.deepEqual(errors, []);
 const evidence = {
   status: 'passed',

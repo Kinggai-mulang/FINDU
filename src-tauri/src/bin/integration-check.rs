@@ -70,12 +70,12 @@ fn run() -> Result<(), String> {
             last_satellite_poll = start.elapsed().as_secs();
             let state = hub.snapshot(Some(&keys[0]))?;
             if state.state == "running" {
-                let value = hub.runtime(Some(&keys[0]))?.satellites(&state.id, true)?;
+                let value = hub.runtime(Some(&keys[0]))?.satellites(&state.id)?;
                 satellite_seen |= value["satellites"].as_array().is_some_and(|rows| !rows.is_empty());
                 let opt = fs::read_to_string(PathBuf::from(&state.output_dir).join("live.opt"))
                     .map_err(|e| e.to_string())?;
-                if opt.contains("IPSClient_Satellite") {
-                    return Err("Diagnostics leaked into OPT".into());
+                if !opt.contains("IPSClient_SatelliteFile") {
+                    return Err("Satellite output missing from the run OPT".into());
                 }
             }
         }
