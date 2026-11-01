@@ -180,7 +180,6 @@ def write_opt(plan_value, directory, files):
                   GNSS_NaviFile=str(files.get('nav', '')), GNSS_SP3File=str(files['sp3']), GNSS_CLKFile=str(files['clk']),
                   GNSS_BIAFile=str(files.get('bia', '')), GNSS_ATXFile=str(files.get('atx', '')), GNSS_RefFile='',
                   GNSS_SSRFile='', GNSS_BIASFile='', GNSS_BaseFile='', GNSS_ProductType='SSR',
-                  GNSS_DecodeDate=observation['start'][:10] if observation['format'] != 'RINEX' else '',
                   GNSS_bOutputAccuracy='OFF', GNSS_bOutputULog='OFF')
     interval = observation['interval_s']
     if not interval or interval <= 0:
