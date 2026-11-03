@@ -15,11 +15,11 @@ p.add_argument('--logs', nargs='*', type=Path, default=[])
 a = p.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
 
-def request(method, endpoint, body=None):
+def request(method, endpoint, body=None, timeout=180):
     raw = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request('http://127.0.0.1:4444' + endpoint, data=raw, method=method,
                                  headers={'Content-Type': 'application/json'})
-    with urllib.request.urlopen(req, timeout=180) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         value = json.load(response)['value']
     if isinstance(value, dict) and 'error' in value:
         raise AssertionError(value)
@@ -47,20 +47,26 @@ with (a.output / 'webdriver.log').open('w') as log:
             assert value['ok'], value
             return value.get('value')
         for _ in range(80):
-            if js('return document.querySelectorAll(".nav-item").length') == 4:
+            if js('return document.querySelectorAll(".nav-item").length') == 5:
                 break
             time.sleep(.25)
-        assert js('return document.querySelectorAll(".nav-item").length') == 4
+        assert js('return document.querySelectorAll(".nav-item").length') == 5
         assert js('return document.querySelector(".sidebar-version").textContent.includes("LINUX")')
         js('window.__testErrors=[];window.addEventListener("error",e=>window.__testErrors.push(e.message));window.addEventListener("unhandledrejection",e=>window.__testErrors.push(String(e.reason)));')
+        def shoot(name):
+            # Software-rendered WebKit under Xvfb can stall a snapshot; the page assertions do not depend on it.
+            try:
+                (a.output / (name + '.png')).write_bytes(base64.b64decode(request('GET', prefix + '/screenshot', timeout=30)))
+            except OSError:
+                evidence.setdefault('screenshotsSkipped', []).append(name)
         evidence = {'engine': invoke('engine_info'), 'paths': invoke('runtime_paths'), 'pages': []}
         assert Path(evidence['paths']['workspace']) == a.app.resolve().parent, evidence['paths']
-        for i, name in enumerate(['实时监控', '后处理', '数据与下载', '分析对比']):
+        for i, name in enumerate(['实时监控', '后处理', '数据与下载', '分析对比', '产品对比']):
             js('Array.from(document.querySelectorAll(".nav-item")).find(e=>e.textContent.includes(arguments[0])).click()', name)
             time.sleep(1)
             assert js('return document.body.innerText.includes(arguments[0])', name)
             assert not js('return document.documentElement.scrollWidth>innerWidth'), name
-            (a.output / ('page-' + str(i) + '.png')).write_bytes(base64.b64decode(request('GET', prefix + '/screenshot')))
+            shoot('page-' + str(i))
             evidence['pages'].append(name)
         # Actual production product worker with the relocated package's own Python and engine.
         obs = a.inputs / 'DATA/BAUT/BAUT00DEU_R_20240190000_01D_30S_MO.24o'
@@ -95,8 +101,8 @@ with (a.output / 'webdriver.log').open('w') as log:
                 time.sleep(1)
                 if tab == '定位与连续性':
                     assert js('return document.querySelectorAll("canvas").length') > 0
-                    (a.output / 'large-position.png').write_bytes(base64.b64decode(request('GET', prefix + '/screenshot')))
-            (a.output / 'large-analysis.png').write_bytes(base64.b64decode(request('GET', prefix + '/screenshot')))
+                    shoot('large-position')
+            shoot('large-analysis')
         evidence['errors'] = js('return window.__testErrors')
         assert evidence['errors'] == [], evidence['errors']
         (a.output / 'check.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf8')

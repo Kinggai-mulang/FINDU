@@ -90,8 +90,17 @@ assert.deepEqual(await kinds('对比产品 4'), ['BIA', 'BIA']);
 console.log('notice:', (await page.getByTestId('input-note').innerText()).replaceAll('\n', ' | '));
 
 await page.getByRole('button', { name: '开始对比' }).click();
-await page.getByText(/已完成对比|没能对比|对比失败/).first().waitFor();
-console.log('result line:', await page.getByText(/已完成对比|没能对比|对比失败/).first().innerText());
+await page
+  .getByText(/已完成对比|没能对比|对比失败/)
+  .first()
+  .waitFor();
+console.log(
+  'result line:',
+  await page
+    .getByText(/已完成对比|没能对比|对比失败/)
+    .first()
+    .innerText(),
+);
 await page.locator('.ant-segmented-item-label', { hasText: /^偏\s?差$/ }).click();
 await page.getByText('各信号的总体 RMS').waitFor();
 console.log('both parts have results');
