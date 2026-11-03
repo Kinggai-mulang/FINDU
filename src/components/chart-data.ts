@@ -1,6 +1,6 @@
 import type { Epoch, Solution } from '../../contracts';
 
-export const fileColors = ['#78adff', '#5bd8bc', '#efba71', '#c4a0f6', '#f28fa5', '#86d4ee'];
+export const fileColors = ['#78adff', '#5bd8bc', '#efba71', '#c4a0f6', '#f28fa5', '#86d4ee', '#a8d96c', '#f07a6a'];
 export const directionColors = { e: '#78adff', n: '#5bd8bc', u: '#efba71' } as const;
 export const solutionGroups = [
   { name: '计算参考', states: ['REFERENCE'], color: '#5bd8bc' },

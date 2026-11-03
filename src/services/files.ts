@@ -1,4 +1,11 @@
 export const isDesktop = () => '__TAURI_INTERNALS__' in window;
+
+/** The dropped paths with every folder replaced by the files in it, so a whole product folder can be dropped at once. */
+export async function expandDropped(paths: string[]): Promise<string[]> {
+  if (!isDesktop()) return paths;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string[]>('expand_dropped_paths', { paths }).catch(() => paths);
+}
 export async function pickPath(directory = false): Promise<string | null> {
   if (!isDesktop()) return null;
   const { open } = await import('@tauri-apps/plugin-dialog');

@@ -1,13 +1,15 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, InputNumber, Segmented, Space } from 'antd';
 import * as echarts from 'echarts/core';
-import { LineChart, BarChart, ScatterChart } from 'echarts/charts';
+import { LineChart, BarChart, ScatterChart, HeatmapChart } from 'echarts/charts';
 import {
   GridComponent,
   TooltipComponent,
   LegendComponent,
   DataZoomComponent,
   MarkPointComponent,
+  MarkLineComponent,
+  VisualMapComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { EChartsCoreOption } from 'echarts/core';
@@ -39,11 +41,14 @@ echarts.use([
   LineChart,
   BarChart,
   ScatterChart,
+  HeatmapChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,
   DataZoomComponent,
   MarkPointComponent,
+  MarkLineComponent,
+  VisualMapComponent,
   CanvasRenderer,
 ]);
 type ZoomState = { id: string; start: number; end: number; startValue?: number; endValue?: number };

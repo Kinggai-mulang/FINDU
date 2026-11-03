@@ -8,6 +8,7 @@ import {
   SettingOutlined,
   LineChartOutlined,
   ApartmentOutlined,
+  DiffOutlined,
   DashboardOutlined,
 } from '@ant-design/icons';
 import type { OptDocument, EngineInfo } from '../contracts';
@@ -17,6 +18,7 @@ import { isDesktop } from './services/files';
 import RealtimeWorkspace from './pages/RealtimeWorkspace';
 import DataDownloads from './pages/DataDownloads';
 import Analysis from './pages/Analysis';
+import Compare from './pages/Compare';
 import NativePostProcess from './pages/NativePostProcess';
 import Console from './components/Console';
 import StatusBar from './components/StatusBar';
@@ -26,12 +28,15 @@ import './styles.css';
 import './native-styles.css';
 import './configuration.css';
 
-type Page = 'monitor' | 'post' | 'config' | 'analysis';
+const desktopName = navigator.userAgent.includes('Linux') ? 'Linux' : 'Windows';
+
+type Page = 'monitor' | 'post' | 'config' | 'analysis' | 'compare';
 const navigation = [
   { id: 'monitor' as const, label: '实时监控', english: 'Monitor', icon: <RadarChartOutlined /> },
   { id: 'post' as const, label: '后处理', english: 'Processing', icon: <ApartmentOutlined /> },
   { id: 'config' as const, label: '数据与下载', english: 'Data & Products', icon: <SettingOutlined /> },
   { id: 'analysis' as const, label: '分析对比', english: 'Analysis', icon: <LineChartOutlined /> },
+  { id: 'compare' as const, label: '产品对比', english: 'Products', icon: <DiffOutlined /> },
 ];
 
 /** Application shell: navigation, page switching and layout. Pages subscribe to the engine data they need. */
@@ -44,7 +49,9 @@ function Workbench() {
         .then(setEngineInfo)
         .catch(() => setEngineInfo(undefined));
   }, []);
-  const storedPage = readStored<string>('page', 'monitor');
+  // the bias comparison is part of the product comparison now
+  const saved = readStored<string>('page', 'monitor');
+  const storedPage = saved === 'bias' ? 'compare' : saved;
   const [page, setPage] = useState<Page>(
     navigation.some((n) => n.id === storedPage) ? (storedPage as Page) : 'monitor',
   );
@@ -148,7 +155,7 @@ function Workbench() {
           </div>
           <div className="sidebar-version">
             <span>FINDU {version}</span>
-            <span>WINDOWS</span>
+            <span>{desktopName.toUpperCase()}</span>
           </div>
         </div>
       </aside>
@@ -163,7 +170,7 @@ function Workbench() {
           <Space size={18}>
             <span className="runtime">
               <span className="tiny-dot" />
-              {isDesktop() ? 'Windows 桌面' : '浏览器预览'}
+              {isDesktop() ? `${desktopName} 桌面` : '浏览器预览'}
             </span>
             {page === 'config' ? (
               <Tag color="blue">产品准备</Tag>
@@ -204,6 +211,8 @@ function Workbench() {
                     navigate('post');
                   }}
                 />
+              ) : page === 'compare' ? (
+                <Compare />
               ) : (
                 <Analysis selected={selected} onSelected={setSelected} />
               )}

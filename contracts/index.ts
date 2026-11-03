@@ -133,6 +133,8 @@ export interface NativeRunRequest {
   referenceXyz?: [number, number, number] | null;
 }
 export interface EngineInfo {
+  /** Optional engine outputs declared by the manifest; `product_convert` 1 = SSR to SP3 / CLK, 2 = also SSR biases to Bias-SINEX. */
+  capabilities?: Record<string, number>;
   buildId: string;
   sourceModified: boolean;
   available: boolean;
@@ -262,4 +264,153 @@ export interface RealtimeSnapshot {
   productLogPath?: string | null;
   statusError?: string | null;
   recordingFiles?: { name: string; path: string; role: string; bytes: number }[];
+}
+
+/** One side of a product comparison: SP3 orbit files and optional RINEX clock files of the same product. */
+export interface ProductSet {
+  name?: string;
+  sp3: string[];
+  clk: string[];
+  /** The orbit refers to the antenna phase centre (HAS, B2b): the radial constant of each satellite is taken out. */
+  apc?: boolean;
+}
+export interface ProductMoments {
+  mean: number;
+  rms: number;
+  std: number;
+  max: number;
+  n: number;
+}
+export interface ProductSatellite {
+  sat: string;
+  system: string;
+  r: ProductMoments;
+  a: ProductMoments;
+  c: ProductMoments;
+  d3: ProductMoments;
+  clock: ProductMoments;
+  clockJumps: number;
+  sisre: number | null;
+  coverage: number;
+  outlier: boolean;
+  rSeries: (number | null)[];
+  aSeries: (number | null)[];
+  cSeries: (number | null)[];
+  clockSeries: (number | null)[];
+}
+export interface ProductSystem {
+  system: string;
+  sats: number;
+  orbitEpochs: number;
+  d3Median: number;
+  rMedian: number;
+  aMedian: number;
+  cMedian: number;
+  d3Rms: number;
+  rMean: number;
+  clockStdMedian: number | null;
+  sisreMedian: number | null;
+  coverage: number;
+}
+/** What a comparison command returns: the products that were compared and those that could not be, with the reason. */
+export interface ComparisonOutcome<T> {
+  results: T[];
+  failures: { name: string; error: string }[];
+}
+export interface ProductComparison {
+  name: string;
+  timeSystem: string;
+  epochs: number[];
+  stepSeconds: number;
+  systems: ProductSystem[];
+  satellites: ProductSatellite[];
+  /** The radial constant of each satellite was taken out because the orbit refers to the antenna phase centre. */
+  apc: boolean;
+  /** Every satellite both products have, excluded or not; the page offers these for selection. */
+  candidates: string[];
+  excluded: string[];
+  /** GEO / IGSO / MEO per satellite of the reference orbit, by orbit shape. */
+  orbitClasses: Record<string, string>;
+  hourly: { system: string; time: number; d3Rms: number }[];
+  hints: string[];
+  testOnly: string[];
+  referenceOnly: string[];
+}
+
+/** Observable-specific bias comparison (Bias-SINEX), see `bias_compare.rs`. */
+export interface BiasSet {
+  name?: string;
+  files: string[];
+  /** Optional RINEX clock files; with them on both sides the narrow-lane is also compared together with the clock. */
+  clocks?: string[];
+  /** Optional SP3 files, only to tell GEO / IGSO / MEO satellites apart for the satellite selection. */
+  orbits?: string[];
+  /** Sign convention of a test product: decided against the reference (`auto`, the default), kept or inverted. */
+  sign?: 'auto' | 'keep' | 'invert';
+}
+export type BiasKind = 'code' | 'codec' | 'phase' | 'wl' | 'nl' | 'nlc' | 'dcb';
+/** The sign the biases of a test product were compared with: 1 as given, -1 inverted. */
+export interface BiasSign {
+  code: number;
+  phase: number;
+  auto: boolean;
+  /** Correlation of the code biases with the reference that decided it, when measurable. */
+  correlation: number | null;
+}
+export interface BiasItem {
+  sat: string;
+  system: string;
+  signal: string;
+  kind: BiasKind;
+  mean: number;
+  rms: number;
+  temporalStd: number;
+  n: number;
+  outlier: boolean;
+  /** Wide-lane and narrow-lane items: residual in cycles per grid epoch, null where the satellite is missing. */
+  series?: (number | null)[];
+}
+/** Residuals of all satellites and epochs; `counts[i]` covers `[min + i * width, min + (i + 1) * width)`. */
+export interface BiasHistogram {
+  min: number;
+  width: number;
+  counts: number[];
+}
+export interface BiasRow {
+  system: string;
+  signal: string;
+  kind: BiasKind;
+  unit: 'ns' | 'cyc';
+  sats: number;
+  offset: number;
+  rms: number;
+  max: number;
+  temporalStd: number;
+  withinTolerance: number | null;
+  outliers: number;
+  totalRms: number;
+  /** Cyclic rows: share of satellite-epochs within ±0.1 cycles. */
+  epochWithin: number | null;
+  histogram: BiasHistogram;
+  /** Per grid epoch: RMS over satellites after the datum was removed, and the datum itself. */
+  series: { rms: (number | null)[]; datum: (number | null)[] };
+}
+export interface BiasComparison {
+  name: string;
+  timeSystem: string;
+  /** First grid epoch `YYYY-MM-DDTHH:MM:SS` in the products' time system; `epochs` samples every `step` seconds. */
+  start: string;
+  step: number;
+  epochs: number;
+  /** Every satellite both products have, excluded or not; the page offers these for selection. */
+  satellites: string[];
+  excluded: string[];
+  sign: BiasSign;
+  /** GEO / IGSO / MEO per satellite, from the SP3 files given to the page; empty without any. */
+  orbitClasses: Record<string, string>;
+  rows: BiasRow[];
+  items: BiasItem[];
+  hints: string[];
+  testOnly: string[];
+  referenceOnly: string[];
 }

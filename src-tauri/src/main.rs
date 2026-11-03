@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod bias_compare;
+mod dropped_files;
 mod gnss_log;
 mod input_path;
 mod library;
@@ -8,6 +10,8 @@ mod native;
 mod ntrip;
 mod options;
 mod paths;
+mod product_compare;
+mod product_convert;
 mod products;
 mod realtime;
 mod results;
@@ -235,16 +239,24 @@ fn main() {
                     std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources").join(name)
                 }
             };
+            let mut runtime = locate("product-runtime");
+            if !cfg!(windows) && !native::platform::python(&runtime).is_file() {
+                runtime = locate("product-runtime-linux");
+            }
             app.manage(products::Products::new(
                 root.clone(),
                 locate("product-tools"),
-                locate("product-runtime").join("python.exe"),
+                native::platform::python(&runtime),
             ));
             app.manage(paths);
             app.manage(library);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            product_compare::compare_products,
+            dropped_files::expand_dropped_paths,
+            bias_compare::compare_biases,
+            product_convert::convert_ssr_products,
             ntrip::ntrip_sourcetable,
             ntrip::ntrip_probe,
             products::retry_product_dcb,

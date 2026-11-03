@@ -37,6 +37,11 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 | `src/analysis.ts`, `src/diagnostics.ts` | Pure analysis/statistics; cached per input array. |
 | `src-tauri/src/realtime.rs`, `live_hub.rs` | Realtime sessions, log tailing, buffers, `realtime_deltas`. |
 | `src-tauri/src/ntrip.rs` | NTRIP source table and mountpoint probe for the realtime form (std sockets, credentials never logged). |
+| `src-tauri/src/product_compare.rs` | SP3 / RINEX clock comparison (orbit RAC, clock, SISRE) of one reference against several products. |
+| `src-tauri/src/bias_compare.rs` | Bias-SINEX OSB comparison: code, DCB, wide-lane and phase after datum removal. |
+| `src/components/InputEditor.tsx`, `src/services/compare-inputs.ts` | The product box of the `Compare` page (`pages/Compare.tsx`, which shows `ProductResults` from `ProductCompare.tsx` and `BiasResults` from `BiasCompare.tsx`): one `InputSet` per product holds BIA, SP3 and CLK files (`useInputs`, persisted as `compareInputs`, changed with functions of the latest inputs so concurrent drops do not overwrite each other). The page converts it with `toProductSet` / `toBiasSet`, runs the orbit / clock comparison for products with SP3 and the bias comparison for those with BIA, and the commands return `{results, failures}` so one bad product does not fail the rest. `InputNotice` says what cannot be compared. |
+| `src/components/SatellitePicker.tsx`, `src/services/satellite-select.ts` | Satellite exclusion picker (BDS generations by number, GEO/IGSO/MEO by measured orbit class, typed ranges, shift ranges) and its pure helpers; both comparison pages send the list as `exclude`. `bias_compare.rs` also decides the sign convention of a test product (`BiasSet.sign`, default `auto`) against the reference. |
+| `src-tauri/src/product_convert.rs` | Runs the engine's PMode=0 SSR → SP3/CLK (level 1) or SSR/OSB → Bias-SINEX (level 2) conversion, and the same for Galileo HAS and BeiDou PPP-B2b recordings (level 3) (capability `product_convert`). |
 | `src-tauri/src/native.rs`, `results.rs` | Post-processing queue and Log=4 result parsing. |
 | `src-tauri/src/table.rs`, `wire.rs` | Column storage of diagnostics; binary encoding of results for the page. |
 | `src-tauri/src/gnss_log.rs` | The Log=4 contract (header, columns, missing markers). |

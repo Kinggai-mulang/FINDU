@@ -4,7 +4,7 @@
 
 # FINDU
 
-**面向 PPP、PPP-AR 与 RTK 的 Windows GNSS 实时 工作台**
+**面向 PPP、PPP-AR 与 RTK 的 Windows / Linux GNSS 实时工作台**
 
 产品准备 · 后处理解算 · 实时监控 · 结果对比，在同一个桌面程序里完成
 
@@ -18,14 +18,47 @@ PPP、PPP-AR、PPP-RTK、RTK
 
 同步支持：北斗 B2b、Galileo HAS、日本 CLAS（PPP-RTK）等改正来源，以及 RTCM3 SSR 实时产品。
 
-> 当前版本 **v0.8.1**。本仓库不包含 IPSPOS 解算算法源码，只包含 FINDU 本身与引擎的二进制、版本清单（见[仓库范围](#仓库范围与数据)）。
+> 当前版本 **v0.8.5**。本仓库不包含 IPSPOS 解算算法源码，只包含 FINDU 本身与引擎的二进制、版本清单（见[仓库范围](#仓库范围与数据)）。
 
 ## 下载与运行
 
-1. 打开 [最新发布页](https://github.com/Kinggai-mulang/FINDU/releases/latest)，下载 Windows x64 便携包。
-2. 完整解压，双击 `FINDU.exe`。请整体保留 `engine`、`product-tools`、`product-runtime` 等目录，不要单独挪走 exe。
+1. 打开 [最新发布页](https://github.com/Kinggai-mulang/FINDU/releases/latest)，按系统选择 Windows x64 ZIP 或 Linux x64 tar.gz 便携包。
+2. 完整解压，Windows 双击 `FINDU.exe`；Linux 执行 `./FINDU`。请整体保留 `engine`、`product-tools`、`product-runtime` 等目录，不要单独挪走可执行程序。
 
 运行环境：Windows x64、Microsoft Edge WebView2 Runtime、Microsoft Visual C++ 2015–2022 x64 运行库。程序未做代码签名。产品下载和实时数据流需要网络；**不需要另装 Python、MATLAB 或 Docker**。
+
+Linux 版面向 **x86_64、glibc 2.35+（Ubuntu 22.04 及兼容环境）**，使用系统的 GTK 3 / WebKitGTK 4.1。在 Ubuntu 上先安装：
+
+```bash
+sudo apt-get update
+sudo apt-get install libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 librsvg2-2 xdg-utils curl gzip
+# 在 Linux 中直接解压，保留执行权限与符号链接
+# tar -xzf FINDU-0.8.5-linux-x64.tar.gz
+# cd FINDU-0.8.5-linux-x64 && ./FINDU
+```
+
+需要图形桌面与可写的程序目录；无桌面服务器可直接使用随包的 `engine/IPSPOS`、`engine/IPSClient`。本版不提供 ARM64、Alpine/musl 或 AppImage。Linux 包应在 Linux 文件系统中解压，避免 Windows 大小写和符号链接转换。
+
+## 从源码生成两个版本
+
+版本统一在 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`；先准备该版本的发布、验证说明。Windows 维护机安装 VS C++、Rust、Node 24 / pnpm 11.25，并准备 WSL2 Ubuntu 22.04+（本机为 `FINDU-Build`）。WSL 内安装 Rust、Node/pnpm，以及：
+
+```bash
+sudo apt-get install build-essential pkg-config curl wget ca-certificates libwebkit2gtk-4.1-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils rsync python3
+```
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm verify
+cargo test --manifest-path src-tauri/Cargo.toml --bin findyou
+# 默认先 Windows，后 WSL 原生 Linux；任意一步失败返回非零
+# 使用其他发行版时：$env:FINDU_LINUX_DISTRO='Ubuntu-22.04'
+pnpm desktop:package
+```
+
+结果为 `deliverables/FINDU-<版本>-windows-x64.zip` 与 `FINDU-<版本>-linux-x64.tar.gz`。Linux 原生依赖及编译缓存在 WSL 的 `~/.cache/findu-build/source`，不会混用 Windows 的 node_modules；首次下载固定哈希的独立 Python，以后复用缓存。无需 Docker。仅生成本机版本可运行 `pnpm desktop:package:native`；Linux 本机先运行 `python3 scripts/prepare-linux-runtime.py`。
+
+`.github/workflows/desktop.yml` 在推送 `v*` 标签或手动触发时，分别在 Windows / Ubuntu 22.04 上检查、原生编译并上传两个压缩包，不自动发布 Release。引擎是两份平台二进制，更新时按 [引擎说明](docs/ENGINE-UPDATE.md) 分别更新并核验清单，FINDU 的构建不依赖私有引擎源码。
 
 ## 功能一览
 
@@ -58,6 +91,28 @@ FINDU 分为四个页面，对应一次完整工作的四个环节。
 - **NTRIP 源表**：在数据流配置里点「源表」，即可获取服务器的挂载点列表，按格式、国家、内容（观测 / 星历 / SSR 改正）筛选，按与大致位置的距离排序，并可连接 8 秒实测该挂载点真正发送的 RTCM 消息。选中后自动填入挂载点。
 - **卫星详情**：天空图（北向上、顺时针方位）、各星座的频点统计、按卫星分组的载噪比图；可按星座、频点或单颗卫星筛选。状态不确定时显示「未知」，不会沿用上一历元的旧值。
 
+### 产品对比：核查轨道、钟差和偏差产品
+
+- 一个页面：参考产品和每个对比产品各放自己有的文件，BIA 偏差、SP3 轨道、CLK 钟差可以一起拖进同一个框（或拖整个文件夹）。有 SP3 的产品比较轨道和钟差，有 BIA 的产品比较偏差，有什么比什么；缺哪一类、哪个产品没比上，页面在产品框上方写明原因。某个产品出错（例如与参考不在同一天）只影响它自己，其余产品照常出结果。
+
+- 以一份最终产品为参考，对比 1–8 份其他产品（SP3 轨道 + 可选 RINEX 钟差），支持多天文件拼接。
+- 指标：轨道径向 / 切向 / 法向 / 三维误差、钟差标准差（逐历元扣除公共偏移）、信号空间测距误差（SISRE）、覆盖率；按系统、卫星、小时统计。
+- 自动提示异常卫星、钟差阶跃、参考点可能不一致（径向有固定偏差）、时间系统不同。
+- 实时录制的 SSR 改正流可以直接生成 SP3 / CLK 再比较，生成由 IPSPOS 引擎完成，与 PPP 使用同一套规则。Galileo HAS 记录和北斗 PPP-B2b 日志也一样，转换框顶部切换即可；它们的轨道参考卫星天线相位中心，对比时勾选“轨道为天线相位中心”（从 HAS / B2b 转换出来的产品会自动勾上），去掉每颗卫星的径向常数后再算误差。
+- 卫星筛选：轨道钟差和偏差共用一个筛选，可以按系统、北斗 BDS-2 / BDS-3、轨道类型 GEO / IGSO / MEO（由轨道形状判定，不看卫星编号）、被标红的异常卫星或输入的范围剔除卫星后重新统计，钟差的公共基准也只在剩下的卫星上重新取。
+
+#### 偏差部分：码 / 相位偏差（OSB）
+
+- 读取 Bias-SINEX（.BIA / .BSX），以一份产品为参考对比其他产品。绝对偏差带有基准约束，比较前逐系统、逐信号扣除公共偏移。
+- 实时录制的 SSR / OSB 流（以及 HAS、B2b 的码偏差）可以由引擎直接转成 Bias-SINEX 再对比，用来检验实时偏差相对最终产品的表现。
+- 卫星筛选：可以把有问题的卫星剔除后重新统计，扣除的公共基准也只在剩下的卫星上重新计算。按系统、按北斗 BDS-2 / BDS-3（按编号，近似）一键剔除或恢复，按轨道类型 GEO / IGSO / MEO 剔除（由 SP3 的轨道半长轴和倾角判定，偏差页给任一产品拖入一个 SP3 即可），一键剔除被标红的异常卫星，也可以输入 `C01-C10 G13` 这样的范围，Shift 点击连选一段。
+- 符号自适应：不同来源的偏差符号约定可能相反（例如 CHC 的 IGS-SSR 流与 WHU 的 RTCM SSR 流）。对比时用参考产品自动判断：先看码偏差与参考的相关方向，再用宽巷是否一致确认相位偏差的符号，并在页面上提示；也可以手动选“不取反 / 取反”。
+- 窄巷看日内波动：窄巷的每星常数取决于整周和各产品的钟差基准，不可比，所以去掉常数，只比较它在一天里的稳定性。
+- 带钟差的比较：给参考和对比产品都添加钟差文件（.clk）后，多出“窄巷+钟差”（实验）和“码偏差+钟差”。后者对北斗很有用：两份产品钟差参考信号不同时，码偏差随钟差基准偏移，加上钟差后才一致。
+- 以图为主：每个信号一张差的分布直方图（宽巷、窄巷的小数周分布，虚线标出 ±0.1 周），各信号 RMS 条形图，各卫星随时间的热力图，以及每个历元的 RMS 和扣除的公共基准随时间的变化；数值表折叠在下面。
+- 指标：宽巷（WL，与钟差无关，直接对应整周模糊度固定的一致性）、窄巷（NL，宽巷固定后的小数周，与钟差配套）、码偏差、码间差（DCB，不含基准），以及单个相位信号的小数周差（仅供参考）。
+- 自动标出异常卫星，并给出每个信号的日内稳定性。
+
 ### 分析对比：把结果看明白
 
 - 直接把 Log=4 结果日志或会话目录拖入分析页即可载入，支持一次拖入多个；拖入状态日志、运行日志等非结果文件时会明确提示。
@@ -85,7 +140,7 @@ FINDU 分为四个页面，对应一次完整工作的四个环节。
 - 凭据（NTRIP 账号密码）只用于连接，不写入日志、报告和历史记录。
 - 原始观测数据只读，任何环节都不会改写它。
 
-各版本的测量方法、硬件环境和回归范围见 [docs](docs/) 下的验证记录，例如 [v0.8.1 验证记录](docs/VALIDATION-0.8.1.md)。
+各版本的测量方法、硬件环境和回归范围见 [docs](docs/) 下的验证记录，例如 [v0.8.5 验证记录](docs/VALIDATION-0.8.5.md)。
 
 ## 仓库范围与数据
 
