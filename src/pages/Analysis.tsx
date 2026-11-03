@@ -32,6 +32,8 @@ import {
 import { exportText, exportPng, isDesktop, pickPath } from '../services/files';
 import { useEngine, workbenchEngine } from '../services/native-engine';
 import { readStored, writeStored } from '../services/storage';
+import { useFileDrop } from '../services/file-drop';
+import { isOptPath } from '../services/input-schema';
 import { CompareChart } from '../components/Charts';
 import { isThinned } from '../components/decimate';
 import { DetailContext, type Detail } from '../components/detail-context';
@@ -252,6 +254,15 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
       setBusy(false);
     }
   };
+  // Any page area accepts result logs or session folders; non-Log=4 files get the import error text.
+  const { ref: dropRef, dragging } = useFileDrop<HTMLDivElement>({
+    accepts: (p) => !isOptPath(p),
+    onDrop: importPaths,
+    multiple: true,
+    priority: 5,
+    enabled: !busy,
+    hint: '请拖入 IPSPOS Log=4 结果日志（.log）或会话目录',
+  });
   const openHistory = async () => {
     try {
       setCatalog(await invoke<ResultEntry[]>('analysis_catalog'));
@@ -631,7 +642,8 @@ function Analysis({ selected, onSelected }: { selected: string[]; onSelected: (i
     </>
   );
   return (
-    <div className="page analysis-page">
+    <div ref={dropRef} className="page analysis-page">
+      {dragging && <div className="opt-drop-overlay">松开即可载入结果 · 支持多个 Log=4 .log 或会话目录</div>}
       <PageHeading
         eyebrow="RESULTS & COMPARISON"
         title="分析对比"

@@ -192,7 +192,17 @@ fn load(input: &Path) -> Result<RealResult, String> {
             None
         }
     });
-    let mut r = results::read_solution(&path, reference)?;
+    let mut r = results::read_solution(&path, reference).map_err(|e| {
+        if e.contains("Log=4 文件头") {
+            // Session folders also hold NTRIP_/PRODUCT_ status logs and console.log; only SOL_ files are results.
+            format!(
+                "{} 不是 IPSPOS Log=4 结果日志（可能是状态日志或运行日志）。结果日志通常以 SOL_ 开头，也可以直接拖入会话目录",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            )
+        } else {
+            e
+        }
+    })?;
     r.id = log_id(&path)?;
     r.name = format!("{name} · {}", &r.id[4..10]);
     r.station = config
