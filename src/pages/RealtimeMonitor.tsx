@@ -32,6 +32,7 @@ import { exportText, isDesktop } from '../services/files';
 import { readStored, writeStored } from '../services/storage';
 import { useOptDrop } from '../services/opt-drop';
 import { PathInput } from '../components/PathInput';
+import { MountpointInput } from '../components/SourceTable';
 import { defaultConfig } from '../domain';
 import { timeRows, geometryDiagnostics, diagnosticsCsv } from '../diagnostics';
 import { AtmosphereDiagnostics } from '../components/AtmosphereDiagnostics';
@@ -379,7 +380,9 @@ export default function RealtimeMonitor({
           normalize={f.name.endsWith('_DataType') ? (v: string[]) => v.join('|') : undefined}
           rules={f.name.endsWith('_Port') ? [{ pattern: /^\d{1,5}$/, message: '请输入有效端口' }] : undefined}
         >
-          {f.name.endsWith('_DataType') ? (
+          {f.name.endsWith('_Mountpoint') ? (
+            <MountpointInput prefix={prefix} placeholder={f.placeholder} />
+          ) : f.name.endsWith('_DataType') ? (
             <Select
               mode="multiple"
               options={(isRtk

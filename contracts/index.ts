@@ -55,6 +55,27 @@ export interface ResultSet {
   productLogPath?: string | null;
   clientStatus?: RealtimeHeartbeat | null;
 }
+export interface NtripMountpoint {
+  mountpoint: string;
+  identifier: string;
+  format: string;
+  details: string;
+  systems: string;
+  network: string;
+  country: string;
+  latitude: number | null;
+  longitude: number | null;
+  nmea: boolean;
+  authentication: string;
+  bitrate: number | null;
+  messages: number[];
+  kinds: ('OBS' | 'EPH' | 'SSR')[];
+}
+export interface NtripProbe {
+  windowSeconds: number;
+  bytes: number;
+  messages: { id: number; count: number }[];
+}
 export interface ResultEntry {
   id: string;
   name: string;

@@ -5,6 +5,7 @@ mod library;
 mod live_hub;
 mod live_log;
 mod native;
+mod ntrip;
 mod options;
 mod paths;
 mod products;
@@ -241,6 +242,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ntrip::ntrip_sourcetable,
+            ntrip::ntrip_probe,
             products::retry_product_dcb,
             products::set_product_date,
             products::dismiss_products,

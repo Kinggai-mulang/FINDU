@@ -36,6 +36,7 @@ If `node`/`pnpm` are not on PATH on the maintainer's machine, a Node 24 runtime 
 | `src/components/chart-theme.ts`, `src/theme.ts` | All colours and chart styling. Do not hard-code colours elsewhere. |
 | `src/analysis.ts`, `src/diagnostics.ts` | Pure analysis/statistics; cached per input array. |
 | `src-tauri/src/realtime.rs`, `live_hub.rs` | Realtime sessions, log tailing, buffers, `realtime_deltas`. |
+| `src-tauri/src/ntrip.rs` | NTRIP source table and mountpoint probe for the realtime form (std sockets, credentials never logged). |
 | `src-tauri/src/native.rs`, `results.rs` | Post-processing queue and Log=4 result parsing. |
 | `src-tauri/src/table.rs`, `wire.rs` | Column storage of diagnostics; binary encoding of results for the page. |
 | `src-tauri/src/gnss_log.rs` | The Log=4 contract (header, columns, missing markers). |
