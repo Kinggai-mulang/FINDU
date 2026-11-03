@@ -2,6 +2,7 @@
 import gzip
 import hashlib
 import json
+import os
 import subprocess
 import time
 from datetime import datetime, timedelta
@@ -90,7 +91,7 @@ def run(request_file):
                         if remaining<=0: break
                         archive=stage/'download.gz'; plain=stage/'candidate.bia'
                         try:
-                            result=subprocess.run(['curl.exe','--silent','--show-error','--fail','--location','--netrc-optional','--connect-timeout',str(min(15,remaining)),'--max-time',str(min(15,remaining)),'--output',str(archive),url],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=min(15,remaining)+.1,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+                            result=subprocess.run(['curl.exe' if os.name == 'nt' else 'curl','--silent','--show-error','--fail','--location','--netrc-optional','--connect-timeout',str(min(15,remaining)),'--max-time',str(min(15,remaining)),'--output',str(archive),url],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=min(15,remaining)+.1,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
                             if result.returncode: raise ValueError(f'下载失败 ({result.returncode})')
                             with gzip.open(archive,'rb') as stream: raw=stream.read(16*1024*1024+1)
                             if len(raw)>16*1024*1024: raise ValueError('DCB 超过 16 MiB')

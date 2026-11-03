@@ -492,7 +492,9 @@ mod tests {
     fn reads_the_source_table_of_a_real_caster() {
         let target = std::env::var("FINDU_TEST_CASTER").expect("set FINDU_TEST_CASTER=host:port");
         let (host, port) = target.rsplit_once(':').unwrap();
-        let table = sourcetable(host, port.parse().unwrap(), "", "").unwrap();
+        let user = std::env::var("FINDU_TEST_USER").unwrap_or_default();
+        let password = std::env::var("FINDU_TEST_PASSWORD").unwrap_or_default();
+        let table = sourcetable(host, port.parse().unwrap(), &user, &password).unwrap();
         println!("{} mountpoints", table.len());
         for m in table.iter().take(5) {
             println!("{} {} {:?} {:?}", m.mountpoint, m.format, m.kinds, m.latitude);

@@ -10,7 +10,7 @@ await fs.writeFile(
 );
 await fs.writeFile(
   'runtime/source-table-ui/main.tsx',
-  `import React from 'react';import {createRoot} from 'react-dom/client';import {ConfigProvider,App,Form,theme} from 'antd';import {MountpointInput} from '/src/components/SourceTable';
+  `import React from 'react';import {createRoot} from 'react-dom/client';import {ConfigProvider,App,Form,theme} from 'antd';import {MountpointInput} from '/src/components/SourceTable';import '/src/native-styles.css';
 function Demo(){const [form]=Form.useForm();const [last,setLast]=React.useState('');return <Form form={form} layout="vertical" initialValues={{ROVE_NTRIP_CasterHost:'caster.example',ROVE_NTRIP_Port:'2101',ROVE_NTRIP_UserID:'user',ROVE_NTRIP_Password:'secret',ROVE_NTRIP_Mountpoint:''}} onValuesChange={(c)=>setLast(JSON.stringify(c))}><Form.Item name="ROVE_NTRIP_Mountpoint" label="挂载点"><MountpointInput prefix="ROVE"/></Form.Item><pre id="last">{last}</pre></Form>;}
 createRoot(document.getElementById('root')!).render(<ConfigProvider theme={{algorithm:theme.darkAlgorithm}}><App><Demo/></App></ConfigProvider>);`,
 );
@@ -77,7 +77,29 @@ await page.getByText('全部', { exact: true }).click();
 await page.getByLabel('搜索挂载点').fill('near');
 assert.equal(await page.locator('.ant-table-row').count(), 1);
 await page.locator('.ant-table-row').first().click();
-await page.getByText('该挂载点要求客户端上报位置').waitFor();
+await page.getByText(/虚拟站 \/ 网格站/).waitFor();
+// Column widths are adjustable by dragging the header edge and the choice is remembered.
+const head = page.locator('.ant-table-thead th', { hasText: '导航系统' });
+const before = (await head.boundingBox()).width;
+const handle = head.locator('.column-resize-handle');
+const box = await handle.boundingBox();
+await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+await page.mouse.down();
+await page.mouse.move(box.x + 120, box.y + box.height / 2, { steps: 6 });
+await page.mouse.up();
+const after = (await head.boundingBox()).width;
+assert.ok(after > before + 80, `column should widen: ${before} -> ${after}`);
+assert.ok(
+  await page.evaluate(
+    () => JSON.parse(window.localStorage.getItem('findyou.sourceTableLayout') ?? '{}').widths?.systems > 250,
+  ),
+);
+// Hidden columns can be turned on from the column menu.
+assert.equal(await page.locator('.ant-table-thead th', { hasText: '网络' }).count(), 0);
+await page.getByRole('button', { name: /列$/ }).click();
+await page.getByRole('checkbox', { name: '网络' }).check();
+await page.locator('.ant-table-thead th', { hasText: '网络' }).waitFor();
+await page.getByText('NTRIP 源表', { exact: true }).click();
 await page.getByRole('button', { name: /探测所选挂载点/ }).click();
 await page.getByText(/1077×8/).waitFor();
 await page.getByRole('button', { name: '使用此挂载点' }).click();

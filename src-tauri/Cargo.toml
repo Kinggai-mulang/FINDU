@@ -1,6 +1,6 @@
 [package]
 name = "findyou"
-version = "0.8.1"
+version = "0.8.5"
 default-run = "findyou"
 description = "FINDU GNSS 工作台"
 authors = ["FINDU"]
@@ -21,6 +21,9 @@ sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security", "Win32_Storage_FileSystem"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [profile.release]
 strip = true

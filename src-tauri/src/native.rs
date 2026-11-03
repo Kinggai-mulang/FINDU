@@ -1,5 +1,7 @@
 #[path = "capacity.rs"]
 pub mod capacity;
+#[path = "platform.rs"]
+pub mod platform;
 use crate::{
     options,
     results::{self, RealResult},
@@ -31,6 +33,8 @@ pub struct EngineInfo {
     pub version: String,
     pub sha256: String,
     pub default_output: String,
+    /// Optional engine outputs declared by the manifest, e.g. `product_convert`.
+    pub capabilities: serde_json::Value,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -123,7 +127,7 @@ impl NativeRuntime {
         )
         .map_err(|e| e.to_string())?;
         options::check_protocol(&manifest)?;
-        let exe = self.engine_dir.join("IPSPOS.exe");
+        let exe = self.engine_dir.join(platform::SOLVER);
         let sha = options::hash(&exe)?;
         if manifest["solver_sha256"].as_str() != Some(sha.as_str()) {
             return Err("IPSPOS 引擎哈希与构建记录不匹配，请重新准备正式引擎".into());
@@ -137,6 +141,7 @@ impl NativeRuntime {
             version: manifest["ipspos_version"].as_str().unwrap_or("").into(),
             sha256: sha,
             default_output: options::display_path(&self.default_root),
+            capabilities: manifest["capabilities"].clone(),
         })
     }
     pub fn snapshot(&self) -> NativeSnapshot {
@@ -460,11 +465,7 @@ impl NativeRuntime {
             .stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
             .stderr(Stdio::from(stdout))
             .stdin(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
+        platform::prepare(&mut command);
         let mut child = command.spawn().map_err(|e| format!("无法启动 IPSPOS：{e}"))?;
         manifest["processId"] = serde_json::json!(child.id());
         manifest["processStartedAt"] = serde_json::json!(now());
@@ -711,7 +712,7 @@ fn tail(path: &Path, size: u64) -> String {
     String::from_utf8_lossy(&bytes).into()
 }
 
-pub(crate) struct Job(#[cfg(windows)] isize);
+pub(crate) struct Job(#[cfg(windows)] isize, #[cfg(target_os = "linux")] i32);
 impl Job {
     pub(crate) fn attach(child: &std::process::Child) -> Result<Self, String> {
         #[cfg(windows)]
@@ -737,7 +738,11 @@ impl Job {
             }
             return Ok(Self(handle as isize));
         }
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
+        {
+            Ok(Self(child.id() as i32))
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
         {
             let _ = child;
             Ok(Self())
@@ -746,6 +751,10 @@ impl Job {
 }
 impl Drop for Job {
     fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
         #[cfg(windows)]
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(self.0 as _);
@@ -756,6 +765,32 @@ impl Drop for Job {
 #[cfg(test)]
 mod queue_tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn dropping_job_kills_its_process_group() {
+        use std::io::BufRead;
+        let mut command = std::process::Command::new("sh");
+        command.args(["-c", "sleep 60 & echo $!; wait"]).stdout(std::process::Stdio::piped());
+        platform::prepare(&mut command);
+        let mut child = command.spawn().unwrap();
+        let job = Job::attach(&child).unwrap();
+        let mut pid = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut pid).unwrap();
+        let pid: i32 = pid.trim().parse().unwrap();
+        drop(job);
+        assert!(!child.wait().unwrap().success());
+        for _ in 0..100 {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap_or_default();
+            if stat.is_empty() || stat.split_once(") ").is_some_and(|(_, rest)| rest.starts_with('Z')) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        panic!("grandchild survived its FINDU task");
+    }
     #[test]
     fn polling_preview_keeps_latest_records_without_changing_full_result() {
         let full: Vec<usize> = (0..86370).collect();

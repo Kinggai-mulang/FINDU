@@ -436,3 +436,22 @@
 .downloads-page .download-form-grid > div {
   min-width: 0;
 }
+
+.column-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: 4px;
+  width: 1px;
+  background: #5c7396;
+}
+.column-resize-handle:hover::after {
+  width: 3px;
+  left: 3px;
+  background: #83b3ff;
+}
+body.column-resizing {
+  cursor: col-resize;
+  user-select: none;
+}

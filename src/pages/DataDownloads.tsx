@@ -194,9 +194,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
         description="提供 观测文件，识别实际观测时段，准备配套产品并生成 IPSPOS 配置。"
         actions={<Tag color="blue">本地工作空间</Tag>}
       />
-      {!desktop && (
-        <Alert showIcon type="info" title="浏览器为界面预览，产品下载与本地文件访问在 Windows 桌面版运行。" />
-      )}
+      {!desktop && <Alert showIcon type="info" title="浏览器为界面预览，产品下载与本地文件访问在 桌面版运行。" />}
       {error && <Alert showIcon type="error" title="下载服务暂不可用" description={error} />}
       <div className="downloads-layout">
         <div>

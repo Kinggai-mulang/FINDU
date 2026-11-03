@@ -216,8 +216,8 @@ export default function NativePostProcess({
         <Alert
           type="info"
           showIcon
-          title="真实解算在 Windows 桌面版运行"
-          description="浏览器可预览界面；请打开 FINDU.exe 导入本地 .opt 并调用 IPSPOS。"
+          title="真实解算在 桌面版运行"
+          description="浏览器可预览界面；请打开 FINDU 桌面程序 导入本地 .opt 并调用 IPSPOS。"
           style={{ marginBottom: 16 }}
         />
       )}

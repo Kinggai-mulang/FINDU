@@ -47,7 +47,10 @@ def engine_path(path):
 
 
 def native_observation(path, repo, date):
-    engine = Path(repo).parent / 'engine' / 'IPSPOS.exe'
+    engine_dir = Path(repo).parent / 'engine'
+    engine = engine_dir / ('IPSPOS.exe' if os.name == 'nt' else 'IPSPOS')
+    if os.name != 'nt' and not engine.is_file():
+        engine = engine_dir / 'linux-x64/IPSPOS'
     if not engine.is_file():
         raise ValueError('缺少支持模式 0 解码的 IPSPOS 引擎，请使用完整便携包')
     manifest = json.loads((engine.parent / 'manifest.json').read_text(encoding='utf-8-sig'))

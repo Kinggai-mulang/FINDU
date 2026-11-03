@@ -1,4 +1,5 @@
 * text=auto
+*.sh text eol=lf
 *.exe binary
 *.dll binary
 *.pyd binary
@@ -7,4 +8,7 @@
 *.icns binary
 *.zip binary
 resources/product-runtime/** linguist-vendored
+resources/product-runtime-linux/** -text linguist-vendored
+resources/engine/linux-x64/IPSPOS binary
+resources/engine/linux-x64/IPSClient binary
 resources/product-tools/ThirdParty/** linguist-vendored

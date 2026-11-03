@@ -115,7 +115,7 @@ pub fn display_path(path: &Path) -> String {
 
 pub fn engine_path(path: &Path) -> Result<String, String> {
     let text = display_path(path);
-    if text.is_ascii() {
+    if text.is_ascii() || !cfg!(windows) {
         return Ok(text);
     }
     #[cfg(windows)]
@@ -155,8 +155,7 @@ mod tests {
     }
     #[test]
     fn engine_identity_requires_the_current_protocol_pair() {
-        let mut manifest =
-            serde_json::json!({"build_id":"current-source","protocols":{"gnss_log":4,"client_status":1}});
+        let mut manifest = serde_json::json!({"build_id":"current-source","platform":crate::native::platform::TARGET,"protocols":{"gnss_log":4,"client_status":1}});
         assert!(check_protocol(&manifest).is_ok());
         manifest["protocols"]["gnss_log"] = serde_json::json!(2);
         assert!(check_protocol(&manifest).is_err());
@@ -168,6 +167,9 @@ mod tests {
 
 /// Identity and protocol compatibility are separate from the human-readable engine version.
 pub fn check_protocol(manifest: &serde_json::Value) -> Result<(), String> {
+    if manifest["platform"].as_str().unwrap_or("windows-x64") != crate::native::platform::TARGET {
+        return Err(format!("引擎平台不匹配，需要 {} 引擎", crate::native::platform::TARGET));
+    }
     if manifest["protocols"]["gnss_log"] != 4
         || manifest["protocols"]["client_status"] != 1
         || manifest["build_id"].as_str().is_none()

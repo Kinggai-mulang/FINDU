@@ -12,17 +12,27 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-FILES = ('IPSPOS.exe', 'IPSClient.exe', 'manifest.json')
+PLATFORMS = {'windows-x64': ('IPSPOS.exe', 'IPSClient.exe'), 'linux-x64': ('IPSPOS', 'IPSClient')}
+
+
+def files(manifest):
+    return (*PLATFORMS[manifest['platform']], 'manifest.json')
 PROTOCOLS = {'gnss_log': 4, 'client_status': 1}
 # Optional engine outputs this FINDU reads (docs/ENGINE-UPDATE.md): PMode=0 summary schema 2 and
 # IPSClient_SatelliteFile with snapshot schema 2.
 CAPABILITIES = {'observation_decode': 2, 'satellite_snapshot': 3}
+# GNSS_DecodeFormat=SP3 (SSR to SP3/CLK) exists only in source trees that contain StreamConvert.c.
+CONVERTER_SOURCE = 'src/IPSPOS/GNSSIO/StreamConvert.c'
+CONVERTER_CAPABILITY = {'product_convert': 3}
 SOURCE_SUFFIXES = {'.c', '.h', '.cpp', '.txt'}
 
 
 def sha(path):
     with Path(path).open('rb') as stream:
-        return hashlib.file_digest(stream, 'sha256').hexdigest()
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(131072), b''):
+            digest.update(block)
+        return digest.hexdigest()
 
 
 def source_files(repo):
@@ -44,10 +54,12 @@ def git(repo, *args):
     return subprocess.run(['git', '-C', str(repo), *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def pack(repo, output):
+def pack(repo, output, platform=None):
     """Collect a Release build of an IPSPOS checkout into an engine directory with its manifest."""
     repo, output = Path(repo).resolve(), Path(output).resolve()
-    exes = {'IPSPOS.exe': repo / 'out/IPSPOS/Release/IPSPOS.exe', 'IPSClient.exe': repo / 'out/IPSClient/Release/IPSClient.exe'}
+    platform = platform or ('windows-x64' if os.name == 'nt' else 'linux-x64')
+    solver, client = PLATFORMS[platform]
+    exes = {solver: repo / 'out/IPSPOS/Release' / solver, client: repo / 'out/IPSClient/Release' / client}
     newest = max(p.stat().st_mtime for p in source_files(repo))
     for name, exe in exes.items():
         if not exe.is_file() or exe.stat().st_mtime < newest:
@@ -63,10 +75,11 @@ def pack(repo, output):
                 'source_modified': bool(git(repo, 'status', '--porcelain', '--', 'CMakeLists.txt', 'src')),
                 'source_sha256': source,
                 'source_hash_method': 'SHA-256 of sorted source relative path NUL content NUL (CMakeLists.txt and src C/C++ headers/sources)',
-                'ipspos_version': version[1], 'protocols': PROTOCOLS, 'capabilities': CAPABILITIES,
-                'built_at_utc': datetime.now(timezone.utc).isoformat(), 'platform': 'windows-x64',
-                'configuration': 'Release', 'solver_sha256': sha(output / 'IPSPOS.exe'),
-                'client_sha256': sha(output / 'IPSClient.exe')}
+                'ipspos_version': version[1], 'protocols': PROTOCOLS,
+                'capabilities': {**CAPABILITIES, **(CONVERTER_CAPABILITY if (repo / CONVERTER_SOURCE).is_file() else {})},
+                'built_at_utc': datetime.now(timezone.utc).isoformat(), 'platform': platform,
+                'configuration': 'Release', 'solver_sha256': sha(output / solver),
+                'client_sha256': sha(output / client)}
     atomic_json(output / 'manifest.json', manifest)
     return summary(check(output))
 
@@ -82,9 +95,12 @@ def check(directory):
         raise ValueError('缺少 IPSPOS 版本')
     if not re.fullmatch(r'[0-9a-fA-F]{64}', manifest.get('source_sha256', '')):
         raise ValueError('缺少可核验的源码 SHA-256')
-    if manifest.get('platform', 'windows-x64') != 'windows-x64':
-        raise ValueError('仅接受 Windows x64 引擎')
-    for key, name in [('solver_sha256', 'IPSPOS.exe'), ('client_sha256', 'IPSClient.exe')]:
+    platform = manifest.get('platform', 'windows-x64')
+    if platform not in PLATFORMS:
+        raise ValueError('仅接受 Windows x64 或 Linux x64 引擎')
+    manifest['platform'] = platform
+    solver, client = PLATFORMS[platform]
+    for key, name in [('solver_sha256', solver), ('client_sha256', client)]:
         exe = directory / name
         if not exe.is_file() or exe.is_symlink():
             raise ValueError(f'缺少独立文件：{name}')
@@ -92,6 +108,12 @@ def check(directory):
             raise ValueError(f'{name} SHA-256 与 manifest 不符，不能只替换单个 EXE')
         with exe.open('rb') as stream:
             head = stream.read(64)
+            if platform == 'linux-x64':
+                if len(head) != 64 or head[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', head, 18)[0] != 62:
+                    raise ValueError(f'{name} 不是 Linux x64 ELF 程序')
+                if os.name != 'nt' and not os.access(exe, os.X_OK):
+                    raise ValueError(f'{name} 缺少执行权限')
+                continue
             if len(head) != 64 or head[:2] != b'MZ':
                 raise ValueError(f'{name} 不是 Windows PE 程序')
             offset = struct.unpack_from('<I', head, 60)[0]
@@ -138,11 +160,16 @@ def atomic_json(path, value):
 def install(candidate, app):
     candidate, app = Path(candidate).resolve(), Path(app).resolve()
     manifest = check(candidate)
-    executable = next((app / name for name in ['FINDU.exe', 'FINDYOU.exe'] if (app / name).is_file()), None)
+    names = ['FINDU.exe', 'FINDYOU.exe'] if manifest['platform'] == 'windows-x64' else ['FINDU']
+    executable = next((app / name for name in names if (app / name).is_file()), None)
     if executable is None:
-        raise ValueError('--app 必须是含 FINDU.exe 的完整程序目录')
+        raise ValueError('--app 必须是含对应平台 FINDU 程序的完整目录')
     if executable.is_symlink():
         raise ValueError('程序文件必须位于目标目录内')
+    if (app / 'build-info.json').is_file():
+        info = json.loads((app / 'build-info.json').read_text(encoding='utf-8-sig'))
+        if info.get('platform', 'windows-x64') != manifest['platform']:
+            raise ValueError('候选引擎与 FINDU 程序平台不匹配')
     target = app / 'engine'
     if target.is_symlink() or target.resolve().parent != app:
         raise ValueError('目标 engine 必须是程序目录下的独立目录')
@@ -155,7 +182,7 @@ def install(candidate, app):
         pass  # A damaged old bundle can still be retained and replaced by a valid bundle.
     if previous and all(previous[k] == manifest[k] for k in ['build_id', 'solver_sha256', 'client_sha256']):
         return {'changed': False, 'engine': summary(manifest)}
-    for path in [executable, target / 'IPSPOS.exe', target / 'IPSClient.exe']:
+    for path in [executable, *(target / name for name in PLATFORMS[manifest['platform']])]:
         available(path)
     info_path = app / 'build-info.json'
     if info_path.is_symlink() or not (app / 'runtime/engine-backups').resolve().is_relative_to(app):
@@ -163,7 +190,7 @@ def install(candidate, app):
     info_bytes = info_path.read_bytes() if info_path.exists() else None
     info = json.loads(info_bytes.decode('utf-8-sig')) if info_bytes is not None else None
     if info is not None and info.get('sha256', sha(executable)) != sha(executable):
-        raise ValueError('FINDU.exe 与应用构建记录不一致，先核对目标程序目录')
+        raise ValueError('FINDU 程序与应用构建记录不一致，先核对目标程序目录')
     stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     suffix = re.sub(r'[^A-Za-z0-9_.-]', '_', previous['build_id'] if previous else 'unverified')[:80]
     backup = app / 'runtime/engine-backups' / f'{stamp}-{suffix}-{uuid.uuid4().hex[:8]}'
@@ -171,7 +198,7 @@ def install(candidate, app):
     moved_old, installed = False, False
     try:
         stage.mkdir()
-        for name in FILES:
+        for name in files(manifest):
             shutil.copy2(candidate / name, stage / name)
         if check(stage) != manifest:
             raise ValueError('候选引擎在复制期间发生变化，未替换目标引擎')
@@ -211,7 +238,7 @@ def main():
     verify = sub.add_parser('check'); verify.add_argument('engine')
     update = sub.add_parser('install'); update.add_argument('engine'); update.add_argument('--app', required=True)
     build = sub.add_parser('pack', help='由已编译的 IPSPOS 仓库生成候选 engine 目录')
-    build.add_argument('repo'); build.add_argument('output')
+    build.add_argument('repo'); build.add_argument('output'); build.add_argument('--platform', choices=list(PLATFORMS))
     args = parser.parse_args()
     try:
         if args.command == 'check':
@@ -219,7 +246,7 @@ def main():
         elif args.command == 'install':
             result = install(args.engine, args.app)
         else:
-            result = pack(args.repo, args.output)
+            result = pack(args.repo, args.output, args.platform)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, OSError) as error:
         parser.exit(1, f'引擎操作未完成：{error}\n')

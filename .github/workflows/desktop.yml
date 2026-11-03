@@ -1,0 +1,55 @@
+name: Windows and Linux desktop packages
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+      - name: Native Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+          python3 scripts/prepare-linux-runtime.py
+      - name: Toolchains
+        shell: bash
+        run: |
+          npm install -g pnpm@11.25.0
+          rustup toolchain install 1.99.1 --profile minimal
+          rustup override set 1.99.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --bin findyou
+      - name: Engine and product tool regressions
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then py=resources/product-runtime/python.exe; else py=resources/product-runtime-linux/bin/python3; fi
+          "$py" -I -B tests/engine-bundle.py
+          "$py" -I -B tests/products-optional.py
+      - run: pnpm desktop:package:native
+      - name: Verify package
+        shell: bash
+        run: node scripts/package-check.mjs "deliverables/FINDU-$(node -p 'require("./package.json").version')-${{ runner.os == 'Windows' && 'windows' || 'linux' }}-x64"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: FINDU-${{ runner.os }}-x64
+          path: |
+            deliverables/*.zip
+            deliverables/*.tar.gz
+          if-no-files-found: error

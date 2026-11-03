@@ -24,7 +24,7 @@ class Transfer:
         self.cache.mkdir(parents=True, exist_ok=True)
         self.fast_root = Path(fast_root)
         self.offline, self.timeout, self.attempts = offline, timeout, attempts
-        self.curl = shutil.which('curl.exe') or shutil.which('curl')
+        self.curl = shutil.which('curl.exe' if os.name == 'nt' else 'curl')
         if not self.curl and not offline:
             raise ValueError('需要 curl；Windows 自带 curl.exe，或安装 curl 后重试')
         self.index = {}
@@ -69,7 +69,7 @@ class Transfer:
                 with gzip.open(source, 'rb') as f, temporary.open('wb') as out:
                     shutil.copyfileobj(f, out)
             elif name.endswith('.Z'):
-                executable = next((p for p in [self.fast_root / 'src/fast/bin/gzip.exe', self.fast_root / 'src/win_bin/bin/gzip.exe'] if p.is_file()), None)
+                executable = next((p for p in [self.fast_root / 'src/fast/bin/gzip.exe', self.fast_root / 'src/win_bin/bin/gzip.exe'] if os.name == 'nt' and p.is_file()), None)
                 executable = str(executable) if executable else shutil.which('gzip')
                 if not executable:
                     raise ValueError('缺少 FAST gzip，无法解压 .Z')

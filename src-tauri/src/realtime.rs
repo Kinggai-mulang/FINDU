@@ -504,7 +504,7 @@ impl RealtimeRuntime {
         )
         .map_err(|e| e.to_string())?;
         if manifest["client_sha256"].as_str()
-            != Some(options::hash(&self.engine_dir.join("IPSClient.exe"))?.as_str())
+            != Some(options::hash(&self.engine_dir.join(crate::native::platform::CLIENT))?.as_str())
         {
             return Err("IPSClient 与引擎构建记录不一致".into());
         }
@@ -657,16 +657,12 @@ impl RealtimeRuntime {
     ) -> Result<(), String> {
         let console = run.join("console.log");
         let stdout = fs::File::create(&console).map_err(|e| e.to_string())?;
-        let mut cmd = Command::new(self.engine_dir.join("IPSClient.exe"));
+        let mut cmd = Command::new(self.engine_dir.join(crate::native::platform::CLIENT));
         cmd.arg(options::engine_path(&opt)?)
             .current_dir(&run)
             .stdout(Stdio::from(stdout.try_clone().map_err(|e| e.to_string())?))
             .stderr(Stdio::from(stdout));
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000);
-        }
+        crate::native::platform::prepare(&mut cmd);
         let mut child = cmd.spawn().map_err(|e| format!("IPSClient 启动失败：{e}"))?;
         let job = match Job::attach(&child) {
             Ok(j) => j,

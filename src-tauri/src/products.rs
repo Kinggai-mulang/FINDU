@@ -271,15 +271,12 @@ impl Products {
             .current_dir(&dir)
             .env("TEMP", &scratch)
             .env("TMP", &scratch)
+            .env("TMPDIR", &scratch)
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .env("PYTHONUTF8", "1")
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000);
-        }
+        crate::native::platform::prepare(&mut cmd);
         if optional {
             cmd.arg("--dcb");
         }

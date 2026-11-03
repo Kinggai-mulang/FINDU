@@ -162,7 +162,7 @@ fn open_folder(path: &std::path::Path) -> Result<(), String> {
     if !path.is_dir() {
         return Err("目标不是目录".into());
     }
-    std::process::Command::new("explorer.exe")
+    std::process::Command::new(if cfg!(windows) { "explorer.exe" } else { "xdg-open" })
         .arg(options::display_path(&path))
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -187,6 +187,7 @@ fn main() {
     let root = std::path::PathBuf::from(&paths.root);
     std::env::set_var("TEMP", root.join("cache/temp"));
     std::env::set_var("TMP", root.join("cache/temp"));
+    std::env::set_var("TMPDIR", root.join("cache/temp"));
     let mut context = tauri::generate_context!();
     context.config_mut().app.app_directories_override =
         Some(tauri::utils::config::AppDirectoriesOverride::Directories(
@@ -203,11 +204,13 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .setup(move |app| {
             let beside = std::env::current_exe()?.parent().unwrap().join("engine");
-            let resource = app.path().resource_dir()?.join("engine");
-            let dev = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources/engine");
-            let engine = if beside.join("IPSPOS.exe").is_file() {
+            let resource = native::platform::engine_resources(&app.path().resource_dir()?.join("engine"));
+            let dev = native::platform::engine_resources(
+                &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources/engine"),
+            );
+            let engine = if beside.join(native::platform::SOLVER).is_file() {
                 beside
-            } else if resource.join("IPSPOS.exe").is_file() {
+            } else if resource.join(native::platform::SOLVER).is_file() {
                 resource
             } else {
                 dev

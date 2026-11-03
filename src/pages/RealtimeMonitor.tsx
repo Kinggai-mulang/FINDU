@@ -818,7 +818,7 @@ export default function RealtimeMonitor({
         <Alert
           showIcon
           type="info"
-          title="浏览器为界面预览；连接与真实解算请在 Windows 桌面运行。"
+          title="浏览器为界面预览；连接与真实解算请在 桌面运行。"
           style={{ marginBottom: 18 }}
         />
       )}
