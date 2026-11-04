@@ -65,4 +65,6 @@ resources\product-runtime\python.exe -B scripts\engine-bundle.py pack D:\05_Code
 
 安装工具拒绝跨平台替换；保留原来的备份和回退行为。0.8.4 所附两个引擎均取自提交 5e2fa3b；源码版本宏实际仍为 BetaV0.611，清单如实记录，不根据提交标题猜测版本。
 
-**HAS 与 B2b 转换。** 在 SP3 或 BIA 转换的 OPT 里加 `GNSS_ProductType = HAS` 或 `B2B`，其余与 SSR 相同：`GNSS_ProductFile` 是记录文件，轨道转换还要 `GNSS_NaviFile`（RINEX 导航、带星历的 RTCM3 流，或接收机的 Unicore 二进制日志，按内容识别），偏差转换只要记录文件。HAS 记录可以是带时间戳的 64 字节页记录、NovAtel / Unicore OEM 日志或 Septentrio SBF（混合 UBX 流暂不支持）；B2b 记录是 Unicore / SinoGNSS 私有帧日志。两者的页和帧自带接收机时间，所以不需要 `GNSS_StartTime`，也不使用 `GNSS_BIASFile`。输出的轨道是广播星历加改正：Galileo HAS 和北斗 B2b 的改正参考卫星天线相位中心，与最终产品（质心）相差一个径向常数，FINDU 的产品对比页有“轨道为天线相位中心”选项来去掉它。HAS 和 B2b 只有码偏差；符号与 SSR 相同（OSB 取广播值的负值），已用最终产品的 OSB 核对。
+0.9.0 的 Windows/Linux 引擎均来自干净提交 `64690b4`，版本宏为 BetaV0.615。相对上一引擎，PPP 固定解按接受子集的非参考目标卫星计数，至少满足 4 颗及配置的最少卫星数；Log=4、StatusLog=1 和可选输出能力未变。
+
+**HAS 与 B2b 转换。** 在 SP3 或 BIA 转换的 OPT 里加 `GNSS_ProductType = HAS` 或 `B2B`，其余与 SSR 相同：`GNSS_ProductFile` 是记录文件，轨道转换还要 `GNSS_NaviFile`（RINEX 导航、带星历的 RTCM3 流，或接收机的 Unicore 二进制日志，按内容识别），偏差转换只要记录文件。HAS 记录可以是带时间戳的 64 字节页记录、NovAtel / Unicore OEM 日志或 Septentrio SBF（混合 UBX 流暂不支持）；B2b 记录是 Unicore / SinoGNSS 私有帧日志。两者的页和帧自带接收机时间，所以不需要 `GNSS_StartTime`，也不使用 `GNSS_BIASFile`。B2b 北斗轨道需要匹配 IODN 的 B-CNAV1 星历，普通 D1/D2 星历不能替代；转换界面会报告有效轨道与钟差的系统覆盖。输出轨道为广播星历加改正；与参考产品的参考点差异由 FINDU 结合来源及偏移稳定性保守判别，可手动保持原值或去径向常量。该处理不是完整 ANTEX 相位中心改正，不能保证所有径向常量都是参考点差异。HAS 和 B2b 只有码偏差；符号与 SSR 相同（OSB 取广播值的负值）。

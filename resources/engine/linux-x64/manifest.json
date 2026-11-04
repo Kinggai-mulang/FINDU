@@ -1,10 +1,10 @@
 {
-  "commit": "3bef9343ac3b94cdb1f46fd6313ad04c3e1d0026",
-  "build_id": "3bef9343ac3b-source-410c12c27906f775",
+  "commit": "64690b4a3aa336cfe3d76bf08bc565c2e775da1c",
+  "build_id": "64690b4a3aa3-source-53d2e53375a48853",
   "source_modified": false,
-  "source_sha256": "410c12c27906f77512b78e0621f5ab36a4102f153fdbd367de539f26f7d58470",
+  "source_sha256": "53d2e53375a48853c4bb962f6e35768eab03301a3f147ffa0d21f5c668d1f083",
   "source_hash_method": "SHA-256 of sorted source relative path NUL content NUL (CMakeLists.txt and src C/C++ headers/sources)",
-  "ipspos_version": "BetaV0.611",
+  "ipspos_version": "BetaV0.615",
   "protocols": {
     "gnss_log": 4,
     "client_status": 1
@@ -14,9 +14,9 @@
     "satellite_snapshot": 3,
     "product_convert": 3
   },
-  "built_at_utc": "2026-11-03T18:40:34.041106+00:00",
+  "built_at_utc": "2026-11-04T14:48:26.608358+00:00",
   "platform": "linux-x64",
   "configuration": "Release",
-  "solver_sha256": "5db618e77fca240dff0c9f1b27d76fa2641126592dc68fa6fce333ea470e6bbb",
-  "client_sha256": "6211dacc07d2574faf6ee19c140b8c209f0abfd4afdea3c04aa365445c6aa65a"
+  "solver_sha256": "a80f7541d6c0c01ae12ef97a31808bb8ace20c70303a8746fe0c6652b72dcdff",
+  "client_sha256": "977d89066804d49404cf7070acfccc1803bc1cc3d79822ccf18a0669b34d9b97"
 }
