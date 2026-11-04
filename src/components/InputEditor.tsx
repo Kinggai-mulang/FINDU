@@ -1,13 +1,14 @@
-import { useState } from 'react';
-import { App, Button, Checkbox, Input, Segmented, Space, Tag, Tooltip } from 'antd';
+import { useEffect, useRef, useState } from 'react';
+import { App, Button, Input, Segmented, Select, Space, Tag, Tooltip } from 'antd';
 import { CloseOutlined, FolderOpenOutlined, InboxOutlined } from '@ant-design/icons';
-import type { BiasSign } from '../../contracts';
+import type { BiasSign, OrbitDecision, OrbitMode } from '../../contracts';
 import { signText } from '../services/bias-compare';
 import {
   addInputPaths,
   classifyInputPath,
   emptySet,
   kindLabels,
+  orbitMode,
   removeInputPath,
   type InputKind,
   type InputSet,
@@ -38,6 +39,7 @@ export function InputEditor({
   converter,
   test,
   detected,
+  orbitDecision,
 }: {
   title: string;
   set: InputSet;
@@ -51,17 +53,28 @@ export function InputEditor({
   test?: boolean;
   /** The sign the last bias comparison used for this product; shown next to the sign choice. */
   detected?: BiasSign;
+  orbitDecision?: OrbitDecision;
 }) {
   const { message } = App.useApp();
   const [typed, setTyped] = useState('');
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   // Files and folders alike; what is no bias, orbit or clock file is left out, and said so.
   const add = async (dropped: string[], info?: ConvertInfo) => {
+    if (!mounted.current) return;
     const paths = await expandDropped(dropped);
+    // A clear or removal must not be undone by a pending folder scan or conversion.
+    if (!mounted.current) return;
     const { rejected } = addInputPaths(emptySet(), paths);
-    // HAS and B2b corrections are applied to broadcast orbits, which refer to the antenna phase centre
     onChange((latest) => {
       const { set: next } = addInputPaths(latest, paths);
-      return info && info.source !== 'ssr' ? { ...next, apc: true } : next;
+      const onlyConvertedOrbits = next.sp3.length > 0 && next.sp3.every((p) => paths.includes(p));
+      return info && info.source !== 'ssr' && onlyConvertedOrbits ? { ...next, orbitSource: info.source } : next;
     });
     const compressed = rejected.filter((p) => classifyInputPath(p) === 'compressed');
     if (compressed.length) message.warning(`${compressed.map(fileName).join('、')} 是压缩文件，请先解压再添加`);
@@ -92,7 +105,7 @@ export function InputEditor({
     <div ref={ref} className={`product-editor ${dragging ? 'drag-active' : ''}`} data-role={title}>
       <div className="product-editor-head">
         <span className="product-dot" style={{ background: accent }} />
-        {onRemove ? (
+        {test ? (
           <Input
             aria-label={`${title}名称`}
             size="small"
@@ -110,14 +123,19 @@ export function InputEditor({
           </Tooltip>
         )}
         {test && (
-          <Tooltip title="Galileo HAS、北斗 B2b 这类加在广播星历上的改正，轨道参考卫星天线相位中心，与最终产品的质心相差一个径向常数。勾选后去掉每颗卫星的径向常数再比较。">
-            <Checkbox
-              aria-label={`${title}轨道为天线相位中心`}
-              checked={!!set.apc}
-              onChange={(e) => onChange((latest) => ({ ...latest, apc: e.target.checked }))}
-            >
-              轨道为天线相位中心
-            </Checkbox>
+          <Tooltip title="自动：结合来源线索与径向偏差稳定性判别，证据不足时保持原值。去径向常量是参考点差异的近似处理，不是基于 ANTEX 和卫星姿态的完整 APC→质心改正。">
+            <Select
+              aria-label={`${title}轨道参考点`}
+              size="small"
+              style={{ width: 185, flexShrink: 0 }}
+              value={orbitMode(set)}
+              onChange={(value: OrbitMode) => onChange((latest) => ({ ...latest, orbitMode: value }))}
+              options={[
+                { value: 'auto', label: '轨道：自动判别' },
+                { value: 'keep', label: '轨道：保持原值' },
+                { value: 'remove', label: '轨道：去径向常量' },
+              ]}
+            />
           </Tooltip>
         )}
         {test && (
@@ -141,6 +159,14 @@ export function InputEditor({
           </Tag>
         )}
       </div>
+      {test && orbitDecision && (
+        <div className="product-hint" data-testid="orbit-decision">
+          <Tag color={orbitDecision.applied ? 'orange' : 'default'}>
+            {orbitDecision.mode === 'auto' ? '自动' : '手动'} · {orbitDecision.applied ? '已去径向常量' : '保持原值'}
+          </Tag>
+          {orbitDecision.reason}
+        </div>
+      )}
       <div className="product-files">
         {files.length === 0 && (
           <span className="product-hint">

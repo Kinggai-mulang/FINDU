@@ -46,11 +46,30 @@ pub struct ProductSet {
     pub sp3: Vec<String>,
     #[serde(default)]
     pub clk: Vec<String>,
-    /// The orbit refers to the satellite antenna phase centre (Galileo HAS and BeiDou PPP-B2b corrections applied to
-    /// broadcast ephemerides do), not to the centre of mass like SP3 products. The radial constant of each satellite is
-    /// then taken out before the errors are computed.
+    /// Legacy manual removal flag; orbit_mode takes precedence when supplied.
     #[serde(default)]
     pub apc: bool,
+    #[serde(default)]
+    pub orbit_mode: Option<OrbitMode>,
+    #[serde(default)]
+    pub orbit_source: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OrbitMode {
+    Auto,
+    Keep,
+    Remove,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OrbitDecision {
+    mode: OrbitMode,
+    applied: bool,
+    reason: String,
+    radial_offsets: BTreeMap<String, f64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -426,6 +445,8 @@ pub struct Comparison {
     pub satellites: Vec<SatelliteResult>,
     /// The radial constant of each satellite was taken out because the orbit refers to the antenna phase centre.
     pub apc: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orbit_decision: Option<OrbitDecision>,
     /// GEO / IGSO / MEO of the satellites of the reference orbit, by orbit shape.
     pub orbit_classes: BTreeMap<String, String>,
     /// Every satellite both products have orbits for, excluded or not; the page offers these for selection.
@@ -528,8 +549,7 @@ fn compare_with(
             "参考与对比产品没有共同的卫星和历元，无法比较；请确认两者覆盖同一时段并使用相同的采样间隔".into(),
         );
     }
-    // An orbit at the antenna phase centre differs from the centre of mass by the satellite antenna offset, which is
-    // nearly all radial and constant for a satellite: take it out and report it, instead of calling it an error.
+    // shortcut: radial mean removal can also erase real constant errors; use ANTEX plus attitude for physical APC conversion.
     let mut offsets: BTreeMap<u8, Vec<f64>> = BTreeMap::new();
     if apc {
         for (sat, w) in work.iter_mut() {
@@ -624,7 +644,7 @@ fn compare_with(
     let mut hints = Vec::new();
     for (system, values) in &offsets {
         hints.push(format!(
-            "已按天线相位中心比较：{} 各卫星的径向常数已去掉（中位数 {:+.2} m）",
+            "已逐星去径向常量（非完整 ANTEX 改正）：{} 各卫星的径向常数已去掉（中位数 {:+.2} m）",
             *system as char,
             median(values.clone())
         ));
@@ -648,12 +668,12 @@ fn compare_with(
             .collect::<Vec<_>>();
         let sisre = list.iter().filter_map(|&i| satellites[i].sisre).collect::<Vec<_>>();
         let r_mean = list.iter().map(|&i| satellites[i].r.mean).sum::<f64>() / list.len() as f64;
-        // A nearly constant radial offset in every satellite is a reference-point mismatch, not noise.
+        // A stable radial offset may indicate a reference-point mismatch, but cannot prove it.
         let spread = pick(&|s| s.r.std);
         let coverage = list.iter().map(|&i| satellites[i].coverage).sum::<f64>() / list.len() as f64;
         if r_mean.abs() > 0.15 && r_mean.abs() > 3.0 * spread {
             hints.push(format!(
-                "{system} 系统径向平均偏差 {:+.2} m，而离散度仅 {:.2} m：这像是两份产品的参考点不同（天线相位中心与质心）；若对比产品是 HAS / B2b 这类加在广播星历上的改正，请勾选“轨道为天线相位中心”",
+                "{system} 系统径向平均偏差 {:+.2} m，而离散度仅 {:.2} m：这像是两份产品的参考点不同（天线相位中心与质心）；若对比产品是 HAS / B2b 这类加在广播星历上的改正，可在轨道参考点中选择“去径向常量”复核（非完整 ANTEX 改正）",
                 r_mean, spread
             ));
         }
@@ -720,6 +740,7 @@ fn compare_with(
         satellites,
         excluded: candidates.iter().filter(|s| exclude.contains(*s)).cloned().collect(),
         apc,
+        orbit_decision: None,
         orbit_classes: candidates
             .iter()
             .filter_map(|s| Some((s.clone(), classify_orbit(reference.orbits.get(s)?)?.to_string())))
@@ -767,6 +788,87 @@ impl<T> Outcome<T> {
     }
 }
 
+fn apc_source(set: &ProductSet) -> bool {
+    if matches!(set.orbit_source.as_deref(), Some("has" | "b2b")) {
+        return true;
+    }
+    // Names are only a source clue; the numerical gate must independently pass for every constellation.
+    !set.sp3.is_empty()
+        && set.sp3.iter().all(|p| {
+            p.rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(p)
+                .to_ascii_uppercase()
+                .split(|c: char| !c.is_ascii_alphanumeric())
+                .any(|token| token == "HAS" || token == "B2B" || token.starts_with("SSRA"))
+        })
+}
+
+fn auto_orbit_decision(plain: &Comparison, source: bool) -> (bool, String) {
+    if plain.systems.iter().all(|s| s.r_mean.abs() <= 0.15) {
+        return (false, "未发现明显径向常量偏移，保持原值；这不等于已确认质心参考点。".into());
+    }
+    if !source {
+        return (
+            false,
+            "待确认：存在径向偏移，但缺少 HAS/B2B/SSRA 来源线索，保持原值以保留可能的真实轨道误差。".into(),
+        );
+    }
+    let span = plain.epochs.last().copied().unwrap_or(0) - plain.epochs.first().copied().unwrap_or(0);
+    let consistent = span >= 3_600_000
+        && !plain.systems.is_empty()
+        && plain.systems.iter().all(|system| {
+            let sats: Vec<_> =
+                plain.satellites.iter().filter(|s| s.system == system.system && s.r.n >= 12).collect();
+            if sats.len() < 6 {
+                return false;
+            }
+            let mean = median(sats.iter().map(|s| s.r.mean).collect());
+            let spread = median(sats.iter().map(|s| s.r.std).collect());
+            let across = median(sats.iter().map(|s| (s.r.mean - mean).abs()).collect());
+            let transverse =
+                median(sats.iter().map(|s| (s.a.rms.powi(2) + s.c.rms.powi(2)).sqrt()).collect());
+            let same_sign = sats.iter().filter(|s| s.r.mean * mean > 0.0).count();
+            (0.5..=3.0).contains(&mean.abs())
+                && spread <= 0.15
+                && mean.abs() > 5.0 * spread
+                && across <= 0.35
+                && mean.abs() > 2.0 * transverse
+                && same_sign * 5 >= sats.len() * 4
+        });
+    if consistent {
+        (true, "来源线索与各系统稳定、同向的径向偏移一致，推断为参考点差异，已逐星去径向常量；这不是完整 ANTEX 改正，真实常量误差仍可能被消除，可切换保持原值复核。".into())
+    } else {
+        (false, "待确认：来源有 APC 线索，但共同样本不足或偏移不够稳定、一致，保持原值；请检查来源、时段和真实轨道误差。".into())
+    }
+}
+
+fn compare_selected(
+    reference: &Products,
+    test: &Products,
+    name: &str,
+    exclude: &BTreeSet<String>,
+    set: &ProductSet,
+) -> Result<Comparison, String> {
+    let mode = set.orbit_mode.unwrap_or(if set.apc { OrbitMode::Remove } else { OrbitMode::Keep });
+    let plain = compare_with(reference, test, name, exclude, false)?;
+    let (applied, reason) = match mode {
+        OrbitMode::Auto => auto_orbit_decision(&plain, apc_source(set)),
+        OrbitMode::Keep => (false, "按手动设置保持原始轨道差异，不去除径向常量。".into()),
+        OrbitMode::Remove => {
+            (true, "按手动设置逐星去径向常量；仅作 APC 参考点差异近似处理，不是完整 ANTEX 改正。".into())
+        }
+    };
+    let radial_offsets = if applied {
+        plain.satellites.iter().map(|s| (s.sat.clone(), s.r.mean)).collect()
+    } else {
+        BTreeMap::new()
+    };
+    let mut result = if applied { compare_with(reference, test, name, exclude, true)? } else { plain };
+    result.orbit_decision = Some(OrbitDecision { mode, applied, reason, radial_offsets });
+    Ok(result)
+}
+
 pub fn run(request: CompareRequest) -> Result<Outcome<Comparison>, String> {
     if request.tests.is_empty() {
         return Err("请至少添加一组对比产品".into());
@@ -779,7 +881,7 @@ pub fn run(request: CompareRequest) -> Result<Outcome<Comparison>, String> {
     let mut outcome = Outcome::new();
     for (i, set) in request.tests.iter().enumerate() {
         let label = if set.name.is_empty() { format!("对比产品 {}", i + 1) } else { set.name.clone() };
-        let one = load(set).and_then(|test| compare_with(&reference, &test, &label, &exclude, set.apc));
+        let one = load(set).and_then(|test| compare_selected(&reference, &test, &label, &exclude, set));
         outcome.add(label, one);
     }
     Ok(outcome)
@@ -969,7 +1071,7 @@ mod tests {
         let test = products(&sp3(&sats, 14, &|i, _| (-1.3 + 0.01 * i as f64, 0.02, 0.0)), None);
         let plain = compare(&reference, &test, "t").unwrap();
         assert!(plain.systems[0].d3_median > 1.2 && !plain.apc, "{:?}", plain.systems[0]);
-        assert!(plain.hints.iter().any(|h| h.contains("勾选“轨道为天线相位中心”")), "{:?}", plain.hints);
+        assert!(plain.hints.iter().any(|h| h.contains("去径向常量")), "{:?}", plain.hints);
         let corrected = compare_with(&reference, &test, "t", &BTreeSet::new(), true).unwrap();
         assert!(corrected.apc);
         assert!(corrected.systems[0].d3_median < 0.05, "{:?}", corrected.systems[0]);
@@ -979,7 +1081,7 @@ mod tests {
             corrected.systems[0]
         );
         assert!((corrected.systems[0].a_median - 0.02).abs() < 1e-3, "the other axes are left alone");
-        assert!(corrected.hints.iter().any(|h| h.contains("已按天线相位中心比较") && h.contains("-1.2")));
+        assert!(corrected.hints.iter().any(|h| h.contains("已逐星去径向常量") && h.contains("-1.2")));
         assert!(corrected.satellites.iter().all(|s| s.r.mean.abs() < 1e-9 && !s.outlier));
     }
 
@@ -993,6 +1095,50 @@ mod tests {
         let g2016 = gps_ms(2016, 6, 1, 0, 0, 0.0);
         assert_eq!(utc_unix_ms(g2016), (days_from_civil(2016, 6, 1) * 86_400 - 17) * 1000);
         assert_eq!(utc_unix_ms(gps_ms(1980, 1, 6, 0, 0, 0.0)), GPS_UNIX * 1000);
+    }
+
+    #[test]
+    fn automatic_radial_removal_requires_source_and_stable_sufficient_samples() {
+        let sats = ["G01", "G02", "G03", "G04", "G05", "G06"];
+        let reference = products(&sp3(&sats, 36, &|_, _| (0.0, 0.0, 0.0)), None);
+        let shifted = products(&sp3(&sats, 36, &|i, _| (-1.3 + i as f64 * 0.01, 0.02, 0.0)), None);
+        let mut set = ProductSet {
+            sp3: vec!["2026_HAS.sp3".into()],
+            orbit_mode: Some(OrbitMode::Auto),
+            ..Default::default()
+        };
+        let run = |test: &Products, set: &ProductSet| {
+            compare_selected(&reference, test, "test", &BTreeSet::new(), set).unwrap()
+        };
+        let corrected = run(&shifted, &set);
+        assert!(corrected.apc);
+        assert!(corrected.systems[0].d3_median < 0.05);
+        assert_eq!(corrected.orbit_decision.unwrap().radial_offsets.len(), 6);
+        set.sp3 = vec!["unknown.sp3".into()];
+        let unknown = run(&shifted, &set);
+        assert!(!unknown.apc);
+        assert!(unknown.orbit_decision.unwrap().reason.contains("待确认"));
+        set.orbit_source = Some("has".into());
+        assert!(run(&shifted, &set).apc, "converter provenance survives generic filenames");
+        let short = products(&sp3(&sats, 14, &|_, _| (-1.3, 0.02, 0.0)), None);
+        assert!(!run(&short, &set).apc);
+        let few = products(&sp3(&sats[..5], 36, &|_, _| (-1.3, 0.02, 0.0)), None);
+        assert!(!run(&few, &set).apc);
+        let unstable = products(&sp3(&sats, 36, &|_, e| (-1.3 + (e as f64).sin(), 0.02, 0.0)), None);
+        assert!(!run(&unstable, &set).apc);
+        let inconsistent =
+            products(&sp3(&sats, 36, &|i, _| (if i < 3 { 1.3 } else { -1.3 }, 0.02, 0.0)), None);
+        assert!(!run(&inconsistent, &set).apc);
+        assert!(!run(&reference, &set).apc);
+        set.orbit_mode = Some(OrbitMode::Keep);
+        assert!(!run(&shifted, &set).apc, "manual choice takes precedence");
+        set.orbit_mode = Some(OrbitMode::Remove);
+        set.orbit_source = None;
+        assert!(run(&shifted, &set).apc);
+        set.orbit_mode = None;
+        assert!(!run(&shifted, &set).apc, "legacy false retains raw orbits");
+        set.apc = true;
+        assert!(run(&shifted, &set).apc, "legacy true retains removal");
     }
 
     #[test]
@@ -1224,12 +1370,14 @@ mod tests {
                 sp3: list("FINDU_CMP_REF_SP3"),
                 clk: list("FINDU_CMP_REF_CLK"),
                 apc: false,
+                ..Default::default()
             },
             tests: vec![ProductSet {
                 name: "test".into(),
                 sp3: list("FINDU_CMP_SP3"),
                 clk: list("FINDU_CMP_CLK"),
                 apc: std::env::var("FINDU_CMP_APC").is_ok(),
+                ..Default::default()
             }],
             exclude: list("FINDU_CMP_EXCLUDE"),
         };

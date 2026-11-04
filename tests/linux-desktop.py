@@ -106,7 +106,7 @@ with (a.output / 'webdriver.log').open('w') as log:
         evidence['errors'] = js('return window.__testErrors')
         assert evidence['errors'] == [], evidence['errors']
         (a.output / 'check.json').write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding='utf8')
-        print('Linux GTK/WebKit four pages, portable paths and offline product worker passed')
+        print('Linux GTK/WebKit five pages, portable paths and offline product worker passed')
     finally:
         if session:
             request('DELETE', '/session/' + session)

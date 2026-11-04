@@ -29,10 +29,6 @@ import { PageHeading, Panel } from '../components/common';
 import { PathInput } from '../components/PathInput';
 import { fieldsForMode, isRtkMode } from '../services/input-schema';
 
-const cases = [
-  'D:\\05_Code\\02_posrtk\\IPSPOS\\opt\\IPSPOS.opt',
-  'D:\\05_Code\\02_posrtk\\IPSPOS\\Data\\IPS-RealTimeRecord\\SESSION_20261001195012_SNTYZC20250613\\RTCMReplay_SNTYZC20250613P.opt',
-];
 const outputs = [
   ['GNSS_bOutputNMEA', 'NMEA 定位'],
   ['GNSS_bOutputLOG', 'GNSS Log=4'],
@@ -223,9 +219,6 @@ export default function NativePostProcess({
       )}
       {error && <Alert type="error" showIcon title="引擎准备失败" description={error} style={{ marginBottom: 16 }} />}
       <div className="native-toolbar">
-        <Button disabled={!desktop || busy} onClick={() => load(cases)}>
-          载入本次两个验收案例
-        </Button>
         <Input
           aria-label="OPT 路径列表"
           value={paths}

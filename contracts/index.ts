@@ -266,13 +266,22 @@ export interface RealtimeSnapshot {
   recordingFiles?: { name: string; path: string; role: string; bytes: number }[];
 }
 
+export type OrbitMode = 'auto' | 'keep' | 'remove';
+export interface OrbitDecision {
+  mode: OrbitMode;
+  applied: boolean;
+  reason: string;
+  radialOffsets: Record<string, number>;
+}
 /** One side of a product comparison: SP3 orbit files and optional RINEX clock files of the same product. */
 export interface ProductSet {
   name?: string;
   sp3: string[];
   clk: string[];
-  /** The orbit refers to the antenna phase centre (HAS, B2b): the radial constant of each satellite is taken out. */
+  /** Legacy manual choice; orbitMode takes precedence when supplied. */
   apc?: boolean;
+  orbitMode?: OrbitMode;
+  orbitSource?: 'has' | 'b2b';
 }
 export interface ProductMoments {
   mean: number;
@@ -324,8 +333,9 @@ export interface ProductComparison {
   stepSeconds: number;
   systems: ProductSystem[];
   satellites: ProductSatellite[];
-  /** The radial constant of each satellite was taken out because the orbit refers to the antenna phase centre. */
+  /** A per-satellite radial mean was removed; this does not prove the orbit's physical reference point. */
   apc: boolean;
+  orbitDecision?: OrbitDecision;
   /** Every satellite both products have, excluded or not; the page offers these for selection. */
   candidates: string[];
   excluded: string[];

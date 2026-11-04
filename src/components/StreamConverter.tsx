@@ -4,6 +4,7 @@ import { Alert, App, Button, Checkbox, Collapse, Input, Segmented, Space } from 
 import { FolderOpenOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { isDesktop } from '../services/files';
 import { useFileDrop } from '../services/file-drop';
+import { systemNames } from '../services/product-compare';
 
 export type ConvertKind = 'orbit' | 'bias';
 /** What was recorded: an RTCM / IGS SSR stream, Galileo HAS or BeiDou PPP-B2b. */
@@ -16,7 +17,15 @@ export interface ConvertInfo {
 /** Engine capability level `product_convert` that each conversion needs. */
 export const convertLevel = (kind: ConvertKind, source: ConvertSource) =>
   source !== 'ssr' ? 3 : kind === 'bias' ? 2 : 1;
-export type ConvertResult = { sp3?: string; clk?: string; bia?: string; directory: string; log: string };
+export type ConvertResult = {
+  sp3?: string;
+  clk?: string;
+  bia?: string;
+  directory: string;
+  log: string;
+  warnings?: string[];
+  coverage?: { orbitSystems: string[]; clockSystems: string[] };
+};
 
 /** UTC time as the engine option takes it; empty is allowed (RINEX ephemerides carry the week). */
 export const validStartTime = (text: string) =>
@@ -116,6 +125,7 @@ export function StreamConverter({
   const [clock, setClock] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [completed, setCompleted] = useState<ConvertResult>();
   // Several recorded files dropped on the converter are sorted into the inputs by name.
   const assign = (paths: string[]) => {
     const found = assignStreamFiles(paths, bias);
@@ -150,6 +160,7 @@ export function StreamConverter({
   const run = async () => {
     setBusy(true);
     setError('');
+    setCompleted(undefined);
     try {
       const request = { kind, source, ssr, bias: timed ? '' : osb, navi, startTime: timed ? '' : start.trim(), name };
       // The narrow-lane with clock needs the clock of the same stream: the orbit conversion writes it next to the biases.
@@ -158,6 +169,7 @@ export function StreamConverter({
           ? await invoke<ConvertResult>('convert_ssr_products', { request: { ...request, kind: 'orbit', bias: '' } })
           : undefined;
       const result = await invoke<ConvertResult>('convert_ssr_products', { request });
+      setCompleted(orbit ?? result);
       onDone(
         [result.sp3, result.clk, result.bia, orbit?.clk].filter((p): p is string => !!p),
         result.directory,
@@ -272,11 +284,27 @@ export function StreamConverter({
                 生成并加入
               </Button>
               {error && <Alert type="error" showIcon message="生成失败" description={error} />}
+              {completed?.coverage && (
+                <Alert
+                  type={completed.warnings?.length ? 'warning' : 'info'}
+                  showIcon
+                  message={`本次输出：轨道 ${completed.coverage.orbitSystems.map((s) => systemNames[s] ?? s).join('、') || '无'}；钟差 ${completed.coverage.clockSystems.map((s) => systemNames[s] ?? s).join('、') || '无'}`}
+                  description={completed.warnings?.join('；')}
+                />
+              )}
               <div className="chart-note">
                 可以把录制的文件直接拖进来：拖到某个输入框里只填那一个，拖到框外的空白处则按文件名自动分到改正数据、偏差流和广播星历。
                 HAS 和 B2b
-                的记录自带时间，不用填起始时间；它们只有码偏差，轨道参考卫星天线相位中心，对比时会自动去掉每颗卫星的径向常数。
+                的记录自带时间，不用填起始时间；它们只有码偏差。轨道对比默认自动判别参考点差异，证据不足时保持原值。
               </div>
+              {source === 'b2b' && !bias && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="北斗 PPP-B2b 需要配套 B-CNAV1 星历"
+                  description="仅含普通 D1/D2 星历的 RTCM3 文件可能只能生成 GPS 产品。请选包含 CNAV1 的 RINEX 4 导航文件或接收机星历日志，并核对转换后的系统覆盖。"
+                />
+              )}
               <div className="chart-note">
                 {bias
                   ? '转换由 IPSPOS 引擎完成，输出在 runtime/exports/ssr-products 下。偏差按 5 分钟间隔写成 OSB，符号按 RTCM 标准；不同来源的符号可能相反，对比时由偏差页对照参考自动判断。'

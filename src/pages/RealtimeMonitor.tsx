@@ -2,7 +2,7 @@ import SatelliteDetails from '../components/SatelliteDetails';
 import { realtimeDisplay } from '../services/realtime-display';
 import { utcRangeSummary } from '../time';
 import { sessionName } from '../services/session-names';
-import { realtimeEditors as editors, defaults, manualSource, realtimeDraftRequest } from '../services/realtime-drafts';
+import { realtimeEditors as editors, defaults, manualSource } from '../services/realtime-drafts';
 import { componentNames, definitions, formatBytes, roleNames, stateNames, streamLabel, val } from './realtime/format';
 import { RecordingMonitor } from './realtime/RecordingMonitor';
 import { MetricHistory } from './realtime/MetricHistory';
@@ -54,6 +54,10 @@ export default function RealtimeMonitor({
   handleDrop = true,
   nameOrdinal = 1,
   onConfigured,
+  onStartRequest,
+  onStartFailed,
+  startError,
+  submitting = false,
 }: {
   snapshot?: RealtimeSnapshot;
   sessionKey?: string;
@@ -61,6 +65,10 @@ export default function RealtimeMonitor({
   handleDrop?: boolean;
   nameOrdinal?: number;
   onConfigured?: (key: string, doc: RealtimeDocument, label: string, station: string) => void;
+  onStartRequest: (key: string) => Promise<string>;
+  onStartFailed: (key: string, error: string) => void;
+  startError?: string;
+  submitting?: boolean;
 }) {
   const editorKey = sessionKey ?? 'new';
   const editor = editors.get(editorKey) ?? {
@@ -303,6 +311,7 @@ export default function RealtimeMonitor({
     message.success('界面配置已保存；连接凭据仅保留在本次会话内存中');
   };
   const start = async () => {
+    if (busy || submitting) return;
     setBusy(true);
     try {
       if (
@@ -320,19 +329,20 @@ export default function RealtimeMonitor({
       editor.label = label;
       editor.station = station;
       editor.output = output;
-      const request = await realtimeDraftRequest(editorKey);
+      const key = await onStartRequest(editorKey);
       setSource(editor.document!.sourcePath);
-      const key = await invoke<string>('start_realtime', { sessionId: sessionKey ?? null, request });
-      editors.set(key, {
-        ...editor,
-        document: editor.document ? { ...editor.document, values: { ...editor.document.values } } : undefined,
-      });
-      if (!sessionKey) editors.delete('new');
       onStarted?.(key);
       setTab(recordOnly ? 'recording' : 'position');
       message.success(recordOnly ? '已开始原始数据录制' : '已启动 IPSClient 实时会话');
     } catch (e) {
-      message.error(e instanceof Error ? e.message : String(e));
+      const error =
+        typeof e === 'object' && e !== null && 'errorFields' in e
+          ? '请检查数据源与配置中标红的字段，补全后重试'
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      onStartFailed(editorKey, error);
+      message.error(error);
     } finally {
       setBusy(false);
     }
@@ -431,7 +441,7 @@ export default function RealtimeMonitor({
         form={form}
         layout="vertical"
         initialValues={draft?.values ?? { ...defaults, ...readStored<Record<string, string>>('realtimeSettings', {}) }}
-        disabled={active}
+        disabled={active || submitting || busy}
         onValuesChange={(_, values) => {
           if (values.GNSS_PMode === '0') {
             values.GNSS_bRecordRTCM3 = 'ON';
@@ -720,8 +730,14 @@ export default function RealtimeMonitor({
           <Button icon={<SaveOutlined />} onClick={save}>
             保存界面配置
           </Button>
-          <Button type="primary" disabled={!isDesktop() || !draft} icon={<CaretRightOutlined />} onClick={start}>
-            {recordOnly ? '开始录制' : '启动真实实时解算'}
+          <Button
+            type="primary"
+            disabled={!isDesktop() || !draft || active || submitting}
+            loading={busy}
+            icon={<CaretRightOutlined />}
+            onClick={start}
+          >
+            {recordOnly ? '仅启动当前录制' : '仅启动当前方案'}
           </Button>
         </Space>
       </Form>
@@ -791,7 +807,9 @@ export default function RealtimeMonitor({
         }
         actions={
           <Space>
-            <Tag color={active ? 'processing' : 'default'}>{stateNames[live?.state ?? 'idle']}</Tag>
+            <Tag color={startError ? 'error' : active || submitting ? 'processing' : 'default'}>
+              {submitting ? '正在启动' : startError ? '启动失败' : stateNames[live?.state ?? 'idle']}
+            </Tag>
             <Button
               aria-label="停止会话"
               disabled={!active || live?.state === 'stopping'}
@@ -802,18 +820,21 @@ export default function RealtimeMonitor({
               停止会话
             </Button>
             <Button
-              aria-label={draft ? (recordOnly ? '开始录制' : '启动实时') : '配置数据源'}
-              disabled={active || !isDesktop()}
+              aria-label={draft ? (recordOnly ? '仅启动当前录制' : '仅启动当前方案') : '配置数据源'}
+              disabled={active || submitting || !isDesktop()}
               type="primary"
               loading={busy}
               icon={<CaretRightOutlined />}
               onClick={draft ? start : () => setTab('settings')}
             >
-              {draft ? (recordOnly ? '开始录制' : '启动实时') : '配置数据源'}
+              {draft ? (recordOnly ? '仅启动当前录制' : '仅启动当前方案') : '配置数据源'}
             </Button>
           </Space>
         }
       />
+      {startError && (
+        <Alert showIcon type="error" title="当前方案未能启动" description={startError} style={{ marginBottom: 18 }} />
+      )}
       {!isDesktop() && (
         <Alert
           showIcon

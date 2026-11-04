@@ -4,7 +4,9 @@
 use crate::native::platform;
 use crate::{native, options, paths};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -72,6 +74,58 @@ pub struct ConvertResult {
     pub bia: Option<String>,
     pub directory: String,
     pub log: String,
+    pub warnings: Vec<String>,
+    pub coverage: Option<Coverage>,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Coverage {
+    orbit_systems: BTreeSet<char>,
+    clock_systems: BTreeSet<char>,
+}
+
+fn output_systems(path: &str, orbit: bool) -> Result<BTreeSet<char>, String> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut systems = BTreeSet::new();
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        let satellite = if orbit {
+            if !line.starts_with('P') {
+                continue;
+            }
+            let coordinates: Vec<f64> =
+                line.get(4..46).unwrap_or("").split_whitespace().filter_map(|v| v.parse().ok()).collect();
+            if coordinates.len() != 3
+                || coordinates.iter().any(|v| !v.is_finite())
+                || coordinates.iter().all(|v| *v == 0.0)
+            {
+                continue;
+            }
+            line.get(1..4).unwrap_or("")
+        } else {
+            if !line.starts_with("AS ") {
+                continue;
+            }
+            line.split_whitespace().nth(1).unwrap_or("")
+        };
+        if satellite.len() == 3 {
+            if let Some(system) = satellite.chars().next().filter(|s| "GRECJI".contains(*s)) {
+                systems.insert(system);
+            }
+        }
+    }
+    Ok(systems)
+}
+
+fn coverage_warnings(source: Source, coverage: &Coverage) -> Vec<String> {
+    if source == Source::B2b
+        && (!coverage.orbit_systems.contains(&'C') || !coverage.clock_systems.contains(&'C'))
+    {
+        vec!["B2b 转换结果缺少北斗轨道或钟差，不能视为完整产品。请核查广播星历是否包含匹配 IODN 的 B-CNAV1；普通 D1/D2 RTCM 星历不能替代。若接收机 B2b 日志带有 CNAV1，可将它同时选作广播星历。".into()]
+    } else {
+        Vec::new()
+    }
 }
 
 /// The engine reads option files as ANSI text, so a path with other characters is handed over as its 8.3 short name.
@@ -297,12 +351,23 @@ pub fn convert(engine_dir: &Path, root: &Path, request: &ConvertRequest) -> Resu
             reason.join("；")
         });
     }
+    let coverage = if request.kind == Kind::Orbit {
+        Some(Coverage {
+            orbit_systems: output_systems(sp3.as_ref().unwrap(), true)?,
+            clock_systems: output_systems(clk.as_ref().unwrap(), false)?,
+        })
+    } else {
+        None
+    };
+    let warnings = coverage.as_ref().map(|c| coverage_warnings(request.source, c)).unwrap_or_default();
     Ok(ConvertResult {
         sp3: sp3.filter(|_| request.kind == Kind::Orbit),
         clk: clk.filter(|_| request.kind == Kind::Orbit),
         bia: bia.filter(|_| request.kind == Kind::Bias),
         directory: options::display_path(&directory),
         log: text.lines().filter(|l| l.contains("PMode=0:")).collect::<Vec<_>>().join("\n"),
+        warnings,
+        coverage,
     })
 }
 
@@ -322,6 +387,23 @@ pub async fn convert_ssr_products(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn b2b_coverage_ignores_missing_sp3_positions_and_checks_both_outputs() {
+        let path = std::env::temp_dir().join(format!("findu-coverage-{}.sp3", std::process::id()));
+        let position = |sat: &str, x: f64| format!("P{sat}{x:14.6}{:14.6}{:14.6} 999999.999999\n", 0.0, 0.0);
+        fs::write(&path, position("G01", 12000.0) + &position("C19", 0.0)).unwrap();
+        let orbit_systems = output_systems(path.to_str().unwrap(), true).unwrap();
+        assert_eq!(orbit_systems, BTreeSet::from(['G']));
+        let mut coverage = Coverage { orbit_systems, clock_systems: BTreeSet::from(['G', 'C']) };
+        assert_eq!(coverage_warnings(Source::B2b, &coverage).len(), 1);
+        coverage.orbit_systems.insert('C');
+        assert!(coverage_warnings(Source::B2b, &coverage).is_empty());
+        coverage.clock_systems.remove(&'C');
+        assert_eq!(coverage_warnings(Source::B2b, &coverage).len(), 1);
+        assert!(coverage_warnings(Source::Ssr, &coverage).is_empty());
+        fs::remove_file(path).unwrap();
+    }
 
     fn request(kind: Kind, start: &str) -> ConvertRequest {
         ConvertRequest {

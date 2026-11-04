@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { BiasSet, ProductSet } from '../../contracts';
+import type { BiasSet, OrbitMode, ProductSet } from '../../contracts';
 import { readStored, writeStored } from './storage';
 
 export type InputKind = 'bia' | 'clk' | 'sp3';
@@ -13,8 +13,10 @@ export interface InputSet {
   bia: string[];
   clk: string[];
   sp3: string[];
-  /** Orbit refers to the antenna phase centre (HAS, B2b); only the orbit page uses it. */
+  /** Legacy manual choice, retained when restoring older saved inputs. */
   apc?: boolean;
+  orbitMode?: OrbitMode;
+  orbitSource?: 'has' | 'b2b';
   /** Sign convention of a test product's biases; only the bias page uses it. */
   sign?: 'auto' | 'keep' | 'invert';
 }
@@ -36,6 +38,10 @@ export function classifyInputPath(path: string): InputKind | 'compressed' | null
 
 export const emptySet = (name = ''): InputSet => ({ name, bia: [], clk: [], sp3: [], sign: 'auto' });
 
+/** Preserve explicit choices saved by older versions; new sets default to automatic assessment. */
+export const orbitMode = (set: Pick<InputSet, 'orbitMode' | 'apc'>): OrbitMode =>
+  set.orbitMode ?? (typeof set.apc === 'boolean' ? (set.apc ? 'remove' : 'keep') : 'auto');
+
 /** Add dropped or chosen paths; each path is kept once, whatever kind it is. */
 export function addInputPaths(set: InputSet, paths: string[]): { set: InputSet; rejected: string[] } {
   const next: Record<InputKind, string[]> = { bia: [...set.bia], clk: [...set.clk], sp3: [...set.sp3] };
@@ -45,7 +51,16 @@ export function addInputPaths(set: InputSet, paths: string[]): { set: InputSet; 
     if (kind === 'compressed' || kind === null) rejected.push(path);
     else if (!next[kind].includes(path)) next[kind].push(path);
   }
-  return { set: { ...set, bia: next.bia.sort(), clk: next.clk.sort(), sp3: next.sp3.sort() }, rejected };
+  return {
+    set: {
+      ...set,
+      bia: next.bia.sort(),
+      clk: next.clk.sort(),
+      sp3: next.sp3.sort(),
+      orbitSource: next.sp3.length === set.sp3.length ? set.orbitSource : undefined,
+    },
+    rejected,
+  };
 }
 
 export const removeInputPath = (set: InputSet, path: string): InputSet => ({
@@ -53,6 +68,7 @@ export const removeInputPath = (set: InputSet, path: string): InputSet => ({
   bia: set.bia.filter((p) => p !== path),
   clk: set.clk.filter((p) => p !== path),
   sp3: set.sp3.filter((p) => p !== path),
+  orbitSource: set.sp3.includes(path) ? undefined : set.orbitSource,
 });
 
 /** The part of a set the orbit / clock comparison uses. */
@@ -61,6 +77,8 @@ export const toProductSet = (set: InputSet): ProductSet => ({
   sp3: set.sp3,
   clk: set.clk,
   apc: !!set.apc,
+  orbitMode: orbitMode(set),
+  orbitSource: set.orbitSource,
 });
 
 /** The part of a set the bias comparison uses; clocks and orbits ride along for the narrow-lane and the satellite classes. */
@@ -94,7 +112,9 @@ const restore = (value: Partial<InputSet> | undefined, name: string): InputSet =
   bia: list(value?.bia),
   clk: list(value?.clk),
   sp3: list(value?.sp3),
-  apc: !!value?.apc,
+  apc: typeof value?.apc === 'boolean' ? value.apc : undefined,
+  orbitMode: ['auto', 'keep', 'remove'].includes(value?.orbitMode ?? '') ? value?.orbitMode : undefined,
+  orbitSource: value?.orbitSource === 'has' || value?.orbitSource === 'b2b' ? value.orbitSource : undefined,
   sign: value?.sign === 'keep' || value?.sign === 'invert' ? value.sign : 'auto',
 });
 function load(): Inputs {

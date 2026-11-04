@@ -32,6 +32,8 @@ export default function Compare() {
   const { message } = App.useApp();
   const [inputs, update] = useInputs();
   const { reference, tests } = inputs;
+  const [referenceRevision, resetReference] = useState(0);
+  const [testsRevision, resetTests] = useState(0);
   const [busy, setBusy] = useState(false);
   const [orbit, setOrbit] = useState<ProductComparison[]>([]);
   const [bias, setBias] = useState<BiasComparison[]>([]);
@@ -51,6 +53,16 @@ export default function Compare() {
   const noOrbit = problem(inputs, 'sp3');
   const noBias = problem(inputs, 'bia');
   const latest = useRef(0);
+  useEffect(() => {
+    // Results and in-flight responses belong to the exact inputs used to calculate them.
+    latest.current++;
+    setOrbit([]);
+    setBias([]);
+    setFailures([]);
+    setErrors([]);
+    setCompared(false);
+    setBusy(false);
+  }, [inputs]);
   const run = async (quiet = false) => {
     const ticket = ++latest.current;
     setBusy(true);
@@ -88,7 +100,11 @@ export default function Compare() {
     setFailures(failed);
     setErrors(problems);
     setCompared(true);
-    setSection((current) => (current === 'orbit' && !orbitResults.length && biasResults.length ? 'bias' : current));
+    setSection((current) => {
+      if (!orbitResults.length && biasResults.length) return 'bias';
+      if (!biasResults.length && orbitResults.length) return 'orbit';
+      return current;
+    });
     setBusy(false);
     if (quiet) return;
     if (failed.length || problems.length) message.warning('有产品没能对比，原因见下方');
@@ -126,9 +142,13 @@ export default function Compare() {
   ].sort();
   const classes = Object.assign({}, ...orbit.map((r) => r.orbitClasses), ...bias.map((r) => r.orbitClasses));
   const excluded = orbit[0]?.excluded ?? bias[0]?.excluded ?? [];
-  // results come back in the order of the test products that have files
-  const detectedSign = (index: number) =>
-    tests[index]?.bia.length ? bias[tests.slice(0, index).filter((t) => t.bia.length > 0).length]?.sign : undefined;
+  const detectedSign = (index: number) => {
+    const name = testName(tests[index], index);
+    // Failed products are absent from results; duplicate names cannot identify a result safely.
+    return tests[index].bia.length && tests.filter((t, i) => testName(t, i) === name).length === 1
+      ? bias.find((r) => r.name === name)?.sign
+      : undefined;
+  };
   // A file dropped beside the boxes would otherwise vanish without a word.
   const { ref: pageRef } = useFileDrop<HTMLDivElement>({
     accepts: () => true,
@@ -149,7 +169,7 @@ export default function Compare() {
           <Space wrap>
             <Button
               icon={<DownloadOutlined />}
-              disabled={shown === 'orbit' ? !orbit.length : !bias.length}
+              disabled={busy || (shown === 'orbit' ? !orbit.length : !bias.length)}
               onClick={() =>
                 void (shown === 'orbit'
                   ? exportText('product-comparison.csv', comparisonCsv(orbit), 'text/csv')
@@ -169,10 +189,37 @@ export default function Compare() {
           </Space>
         }
       />
-      <Panel title="选择产品" extra={<Tag>最多 {MAX_TESTS} 组对比</Tag>}>
+      <Panel
+        title="选择产品"
+        extra={
+          <Space wrap>
+            <Button
+              size="small"
+              onClick={() => {
+                resetReference((n) => n + 1);
+                update((all) => ({ ...all, reference: emptySet('参考产品') }));
+              }}
+            >
+              清空参考产品
+            </Button>
+            <Button
+              size="small"
+              onClick={() => {
+                resetTests((n) => n + 1);
+                update((all) => ({ ...all, tests: [emptySet('对比产品 1')] }));
+              }}
+            >
+              清空对比产品
+            </Button>
+            <Tag>最多 {MAX_TESTS} 组对比</Tag>
+          </Space>
+        }
+      >
+        <div className="chart-note">两侧可分别清空，仅移除页面中的选择并重置对应设置，不删除磁盘文件。</div>
         <InputNotice inputs={inputs} />
         <div className="product-inputs">
           <InputEditor
+            key={`reference-${referenceRevision}`}
             title="参考产品"
             set={reference}
             onChange={(change) => update((all) => ({ ...all, reference: change(all.reference) }))}
@@ -181,13 +228,18 @@ export default function Compare() {
           <div className="product-tests">
             {tests.map((t, i) => (
               <InputEditor
-                key={i}
+                key={`${testsRevision}-${i}`}
                 test
                 title={`对比产品 ${i + 1}`}
                 set={t}
                 accent={fileColors[i % fileColors.length]}
                 converter={{ level: convertLevel }}
                 detected={detectedSign(i)}
+                orbitDecision={
+                  tests.filter((x, k) => testName(x, k) === testName(t, i)).length === 1
+                    ? orbit.find((r) => r.name === testName(t, i))?.orbitDecision
+                    : undefined
+                }
                 onChange={(change) =>
                   update((all) => ({ ...all, tests: all.tests.map((x, k) => (k === i ? change(x) : x)) }))
                 }

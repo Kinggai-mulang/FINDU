@@ -3,10 +3,9 @@ import { Button, Collapse, Input, Space, Tag, Tooltip } from 'antd';
 import { systemNames } from '../services/product-compare';
 import {
   classGroups,
-  groupSatellites,
   invertExcluded,
   parseSatellites,
-  satelliteGroups,
+  orbitClassNames,
   setExcluded,
   toggleExcluded,
 } from '../services/satellite-select';
@@ -15,8 +14,8 @@ import {
 const SYSTEM_ORDER = ['G', 'E', 'C', 'R', 'J'];
 
 /**
- * Pick the satellites that are left out of the statistics. A satellite is a toggle button; whole systems, BeiDou
- * generations and orbit types, the satellites the comparison flagged, and ranges typed as text change many at once, and
+ * Pick the satellites that are left out of the statistics. A satellite is a toggle button; whole systems and orbit
+ * types, the satellites the comparison flagged, and ranges typed as text change many at once, and
  * shift-click selects a stretch of one system. Every change is reported at once; the page recomputes after a pause.
  */
 export function SatellitePicker({
@@ -32,7 +31,7 @@ export function SatellitePicker({
   /** Satellites the comparison marked as outliers; offered as a one-click exclusion. */
   flagged: string[];
   busy?: boolean;
-  /** GEO / IGSO / MEO per satellite, measured from an orbit file; without it only the BeiDou generations are offered. */
+  /** GEO / IGSO / MEO measured from an orbit file; missing classes are never inferred from PRNs. */
   classes?: Record<string, string>;
   onChange: (excluded: string[]) => void;
 }) {
@@ -109,6 +108,7 @@ export function SatellitePicker({
               {systems.map((system) => {
                 const list = satellites.filter((s) => s[0] === system);
                 const gone = list.filter((s) => off.has(s));
+                const unclassified = list.filter((s) => !orbitClassNames.includes(classes[s]));
                 return (
                   <div key={system} className="satellite-system" data-system={system}>
                     <div className="satellite-system-head">
@@ -125,25 +125,14 @@ export function SatellitePicker({
                       <Button size="small" type="link" onClick={() => onChange(invertExcluded(excluded, list))}>
                         反选
                       </Button>
-                      {[
-                        ...(satelliteGroups[system] ?? []).map((g) => ({
-                          key: g.key,
-                          label: g.label,
-                          hint: g.hint,
-                          members: groupSatellites(system, g, satellites),
-                        })),
-                        ...classGroups(system, classes, satellites).map((g) => ({
-                          ...g,
-                          hint: '按轨道形状判定（半长轴和轨道倾角）',
-                        })),
-                      ].map((group) => {
+                      {classGroups(system, classes, satellites).map((group) => {
                         const { members } = group;
                         if (!members.length) return null;
                         const all = members.every((s) => off.has(s));
                         return (
                           <Tooltip
                             key={group.key}
-                            title={`${group.hint}：${members.length} 颗，点击${all ? '恢复' : '剔除'}`}
+                            title={`由 SP3 位置序列估算半长轴和轨道倾角：${members.length} 颗，点击${all ? '恢复' : '剔除'}`}
                           >
                             <Button
                               size="small"
@@ -158,6 +147,12 @@ export function SatellitePicker({
                         );
                       })}
                     </div>
+                    {system === 'C' && unclassified.length > 0 && (
+                      <div className="chart-note">
+                        {unclassified.length} 颗北斗卫星尚未判定轨道类型：请提供覆盖相应时段的有效 SP3
+                        轨道。仍可逐星筛选，不按 PRN 推断轨道类型。
+                      </div>
+                    )}
                     <div className="satellite-chips">
                       {list.map((sat) => (
                         <button

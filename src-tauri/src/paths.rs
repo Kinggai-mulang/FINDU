@@ -21,7 +21,10 @@ pub fn workspace(exe: &Path) -> PathBuf {
     if parent.file_name().is_some_and(|n| n == "debug" || n == "release")
         && parent.parent().is_some_and(|p| p.file_name().is_some_and(|n| n == "target"))
     {
-        return PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+        let project = parent.parent().and_then(Path::parent).unwrap_or(parent);
+        if project.file_name().is_some_and(|n| n == "src-tauri") {
+            return project.parent().unwrap_or(project).to_path_buf();
+        }
     }
     parent.to_path_buf()
 }
@@ -61,5 +64,13 @@ mod tests {
             PathBuf::from("D:/apps/FINDYOU")
         );
         assert_eq!(workspace(Path::new("D:/portable/FINDYOU.exe")), PathBuf::from("D:/portable"));
+        assert_eq!(
+            workspace(Path::new("E:/checkout/src-tauri/target/debug/findyou.exe")),
+            PathBuf::from("E:/checkout")
+        );
+        assert_eq!(
+            workspace(Path::new("E:/portable/target/release/FINDU.exe")),
+            PathBuf::from("E:/portable/target/release")
+        );
     }
 }

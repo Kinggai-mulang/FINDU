@@ -119,6 +119,8 @@ await page.addInitScript((payload) => {
         return {
           results: payload.map((r) => ({
             ...r,
+            name: args.request.tests[0].name,
+            orbitClasses: window.noOrbitClasses ? {} : r.orbitClasses,
             excluded: (args.request.exclude ?? []).filter((sat) => r.satellites.includes(sat)),
           })),
           failures: [],
@@ -259,7 +261,7 @@ await page.getByText(/第一频率相位偏差的小数周/).waitFor();
 await label('码偏差').click();
 assert.equal(await cards().count(), 2);
 await label('相位偏差').click();
-await page.getByText(/不同机构之间相差很大是正常的/).waitFor();
+await page.getByText(/差值较大不能单独证明整数特性或解码有误/).waitFor();
 await label('宽巷（WL）').click();
 for (const canvas of await cards().locator('canvas').all()) assert.ok((await canvas.boundingBox()).height > 100);
 
@@ -293,14 +295,14 @@ await page.getByTestId('sign-note').getByText('码和相位偏差已取反（自
 await page.getByLabel('对比产品 1路径').fill('D:/b/orbit.SP3');
 await page.getByLabel('对比产品 1添加路径').click();
 await page.getByText('SP3 · orbit.SP3').waitFor();
-await page.locator('.ant-segmented-item-label', { hasText: /^不取反$/ }).click();
+await page.locator('[data-role="对比产品 1"] .ant-segmented-item-label', { hasText: /^不取反$/ }).click();
 await start.click();
 await page.waitForFunction(() => {
   const call = window.calls.filter((c) => c.command === 'compare_biases').at(-1);
   return call.request.tests[0].sign === 'keep' && call.request.tests[0].orbits.join() === 'D:/b/orbit.SP3';
 });
 
-// Satellite selection: one click for the flagged ones, a typed range, a BeiDou generation, a single chip, and back.
+// Satellite selection uses measured orbit types, never PRN-based BeiDou generations.
 const compareCalls = () => page.evaluate(() => window.calls.filter((c) => c.command === 'compare_biases'));
 const lastExclude = async () => (await compareCalls()).at(-1).request.exclude;
 const expectExclude = (list) =>
@@ -323,9 +325,12 @@ await page.getByLabel('按范围选择卫星').fill('C01-C06 X99');
 await page.getByRole('button', { name: /^剔\s?除$/ }).click();
 await page.getByText('没有这些卫星：X99').waitFor();
 await expectExclude(['C01', 'C02', 'C06', 'G02']);
-await page.getByRole('button', { name: '恢复BDS-2' }).click();
+assert.equal(await page.getByRole('button', { name: /BDS-[23]/ }).count(), 0);
+await page.getByRole('button', { name: '恢复GEO' }).click();
+await expectExclude(['C06', 'G02']);
+await page.getByRole('button', { name: '恢复IGSO' }).click();
 await expectExclude(['G02']);
-await page.getByRole('button', { name: '剔除BDS-3' }).click();
+await page.locator('[data-system="C"]').getByRole('button', { name: '剔除MEO' }).click();
 await expectExclude(['C20', 'C21', 'G02']);
 assert.equal(await page.getByRole('button', { name: 'C20', exact: true }).getAttribute('aria-pressed'), 'false');
 assert.equal(await page.getByRole('button', { name: 'C01', exact: true }).getAttribute('aria-pressed'), 'true');
@@ -352,6 +357,17 @@ await page.getByText(/参考中有、对比产品缺少：R01/).waitFor();
 await page.getByRole('tab', { name: '总览' }).click();
 await page.getByText('各信号的总体 RMS').waitFor();
 await page.screenshot({ path: 'runtime/compare-ui-bias/result.png', fullPage: true });
+await page.evaluate(() => (window.noOrbitClasses = true));
+await start.click();
+await page.getByText(/5 颗北斗卫星尚未判定轨道类型/).waitFor();
+assert.equal(
+  await page
+    .locator('[data-system="C"]')
+    .getByRole('button', { name: /GEO|IGSO|MEO|BDS-[23]/ })
+    .count(),
+  0,
+);
+assert.equal(await page.locator('[data-system="C"] .satellite-chip').count(), 5);
 assert.deepEqual(errors, []);
 await browser.close();
 console.log('bias compare UI ok');

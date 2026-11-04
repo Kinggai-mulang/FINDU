@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from 'react';
-import { Alert, Segmented, Select, Space, Table, Tabs, Tag } from 'antd';
+import { Alert, Button, Segmented, Select, Space, Table, Tabs, Tag, Tooltip } from 'antd';
 import type { ProductComparison, ProductSatellite } from '../../contracts';
 import { Chart } from '../components/Charts';
 import { fileColors } from '../components/chart-data';
@@ -22,11 +22,12 @@ export const ProductResults = memo(function ProductResults({ results }: { result
   const [sat, setSat] = useState<string | undefined>();
   const [metric, setMetric] = useState<SeriesKey>('r');
   const [barMetric, setBarMetric] = useState<BarMetric>('d3');
+  const [allHints, setAllHints] = useState(false);
   const current = results[Math.min(product, results.length - 1)];
   const allSats = useMemo(() => [...new Set(results.flatMap((r) => r.satellites.map((s) => s.sat)))].sort(), [results]);
   const selectedSat =
     sat && allSats.includes(sat) ? sat : (current.satellites.find((s) => s.outlier)?.sat ?? allSats[0]);
-  const systems = [...new Set(current.satellites.map((s) => s.system))];
+  const systems = [...new Set(results.flatMap((r) => r.satellites.map((s) => s.system)))];
   const hints = results.flatMap((r) => r.hints.map((h) => (results.length > 1 ? `${r.name}：${h}` : h)));
   const overview = results.flatMap((r, i) =>
     r.systems.map((s) => ({
@@ -85,10 +86,23 @@ export const ProductResults = memo(function ProductResults({ results }: { result
       render: (n: number) => (n ? <Tag color="orange">{n}</Tag> : '0'),
     },
     { title: 'SISRE / cm', width: 100, render: (_: unknown, s: ProductSatellite) => cm(s.sisre, 2) },
-    { title: '覆盖率', width: 80, render: (_: unknown, s: ProductSatellite) => `${(s.coverage * 100).toFixed(0)}%` },
+    {
+      title: '参考匹配率',
+      width: 100,
+      render: (_: unknown, s: ProductSatellite) => `${(s.coverage * 100).toFixed(0)}%`,
+    },
   ];
   return (
     <>
+      <Space wrap style={{ marginBottom: 12 }} data-testid="orbit-treatments">
+        {results.map((r, i) => (
+          <Tooltip key={`${i}-${r.name}`} title={r.orbitDecision?.reason}>
+            <Tag color={r.apc ? 'orange' : 'default'}>
+              {r.name} · {r.apc ? '已去径向常量' : '保持原值'}
+            </Tag>
+          </Tooltip>
+        ))}
+      </Space>
       {hints.length > 0 && (
         <Alert
           type="warning"
@@ -96,11 +110,18 @@ export const ProductResults = memo(function ProductResults({ results }: { result
           style={{ marginBottom: 12 }}
           message="需要注意"
           description={
-            <ul className="product-hints">
-              {hints.map((h) => (
-                <li key={h}>{h}</li>
-              ))}
-            </ul>
+            <>
+              <ul className="product-hints">
+                {(allHints ? hints : hints.slice(0, 4)).map((h) => (
+                  <li key={h}>{h}</li>
+                ))}
+              </ul>
+              {hints.length > 4 && (
+                <Button size="small" type="link" onClick={() => setAllHints(!allHints)}>
+                  {allHints ? '收起' : `展开其余 ${hints.length - 4} 条`}
+                </Button>
+              )}
+            </>
           }
         />
       )}
@@ -135,12 +156,13 @@ export const ProductResults = memo(function ProductResults({ results }: { result
                   { title: '全体 RMS / cm', width: 110, render: (_: unknown, r) => cm(r.d3Rms, 1) },
                   { title: '钟差标准差 / cm', width: 120, render: (_: unknown, r) => cm(r.clockStdMedian, 1) },
                   { title: 'SISRE / cm', width: 100, render: (_: unknown, r) => cm(r.sisreMedian, 1) },
-                  { title: '覆盖率', width: 80, render: (_: unknown, r) => `${(r.coverage * 100).toFixed(0)}%` },
+                  { title: '参考匹配率', width: 100, render: (_: unknown, r) => `${(r.coverage * 100).toFixed(0)}%` },
                 ]}
                 footer={() => (
                   <span className="chart-note">
                     三维、径向、切向、法向和钟差为每颗卫星 RMS（钟差为标准差）的系统内中位数；全体 RMS
                     为所有卫星历元合并。 钟差已逐历元扣除同系统的公共偏移，SISRE 另外扣除了各星的固定偏差。
+                    参考匹配率以产品已有轨道历元为分母，不代表整段连续供给；各产品分别与参考匹配，并非多组共同样本。
                   </span>
                 )}
               />
@@ -197,6 +219,7 @@ export const ProductResults = memo(function ProductResults({ results }: { result
                   size="small"
                   rowKey="sat"
                   dataSource={rows}
+                  locale={{ emptyText: `${current.name} 在${systemNames[system] ?? '当前筛选'}下没有可比卫星` }}
                   columns={satelliteColumns}
                   pagination={{ pageSize: 20, hideOnSinglePage: true, showSizeChanger: false }}
                   rowClassName={(s) => (s.outlier ? 'product-outlier' : '')}

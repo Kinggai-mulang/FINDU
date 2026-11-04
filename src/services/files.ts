@@ -6,10 +6,10 @@ export async function expandDropped(paths: string[]): Promise<string[]> {
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<string[]>('expand_dropped_paths', { paths }).catch(() => paths);
 }
-export async function pickPath(directory = false): Promise<string | null> {
+export async function pickPath(directory = false, title = directory ? '选择目录' : '选择文件'): Promise<string | null> {
   if (!isDesktop()) return null;
   const { open } = await import('@tauri-apps/plugin-dialog');
-  const path = await open({ directory, multiple: false, title: directory ? '选择目录' : '选择观测文件' });
+  const path = await open({ directory, multiple: false, title });
   return typeof path === 'string' ? path : null;
 }
 export async function readJsonFile(): Promise<string | null> {

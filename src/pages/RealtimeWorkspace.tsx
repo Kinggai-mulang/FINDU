@@ -2,11 +2,16 @@ import capacity from '../../contracts/capacity.json';
 import { realtimeDisplay } from '../services/realtime-display';
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { App, Button, Input, Select, Space, Table, Tag, Tooltip } from 'antd';
+import { Alert, App, Button, Input, Select, Space, Table, Tag, Tooltip } from 'antd';
 import { FolderOpenOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { RealtimeDocument, RealtimeSnapshot } from '../../contracts';
 import RealtimeMonitor from './RealtimeMonitor';
-import { forgetRealtimeDraft, seedRealtimeDraft, realtimeDraftRequest } from '../services/realtime-drafts';
+import {
+  forgetRealtimeDraft,
+  seedRealtimeDraft,
+  realtimeDraftRequest,
+  realtimeEditors,
+} from '../services/realtime-drafts';
 import { useEngine, workbenchEngine } from '../services/native-engine';
 
 import { isDesktop } from '../services/files';
@@ -19,6 +24,8 @@ type Row = Pending & { snapshot?: RealtimeSnapshot };
 let savedPending: Pending[] = [];
 let savedFocus = '';
 let savedChecked: string[] = [];
+type StartAttempt = { state: 'starting' | 'failed'; previousRun?: string; error?: string };
+let savedAttempts: Record<string, StartAttempt> = {};
 const active = (s?: RealtimeSnapshot) => s && ['starting', 'running', 'stopping'].includes(s.state);
 const states = {
   idle: '待启动',
@@ -41,11 +48,24 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
   const [checked, setCheckedState] = useState(savedChecked);
   const [paths, setPaths] = useState('');
   const [busy, setBusy] = useState(false);
+  const [attempts, setAttemptsState] = useState(savedAttempts);
+  const submitting = useRef(new Set<string>());
   const [filter, setFilter] = useState('all');
-  const setPending = (p: Pending[]) => {
-    savedPending = p;
-    setPendingState(p);
+  const setPending = (update: Pending[] | ((previous: Pending[]) => Pending[])) => {
+    setPendingState((previous) => {
+      const next = typeof update === 'function' ? update(previous) : update;
+      savedPending = next;
+      return next;
+    });
   };
+  const setAttempt = (key: string, attempt?: StartAttempt) =>
+    setAttemptsState((previous) => {
+      const next = { ...previous };
+      if (attempt) next[key] = attempt;
+      else delete next[key];
+      savedAttempts = next;
+      return next;
+    });
   const setChecked = (ids: string[]) => {
     savedChecked = ids;
     setCheckedState(ids);
@@ -60,7 +80,11 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
       snapshot: s,
     })),
     ...pending.filter((p) => !sessions.some((s) => s.sessionKey === p.key)),
-  ];
+  ].sort((a, b) => a.label.localeCompare(b.label, 'zh-CN', { numeric: true }));
+  const starting = (row: Row) =>
+    attempts[row.key]?.state === 'starting' && row.snapshot?.id === attempts[row.key]?.previousRun;
+  const startError = (row: Row) => (attempts[row.key]?.state === 'failed' ? attempts[row.key].error : undefined);
+  const occupied = (row: Row) => active(row.snapshot) || starting(row);
   const focusKey =
     focus === '__new__' ? '__new__' : rows.some((r) => r.key === focus) ? focus : rows[0]?.key || '__new__';
   const chosen = rows.find((r) => r.key === focusKey);
@@ -81,8 +105,49 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
     workbenchEngine.selectLive(key);
   };
   const started = (key: string) => {
-    setPending(pending.filter((p) => p.key !== key));
     select(key);
+  };
+  const failed = (key: string, error: string) => setAttempt(key, { state: 'failed', error });
+  const startDraft = async (key: string) => {
+    if (submitting.current.has(key)) throw new Error('此方案正在提交，请等待启动结果');
+    submitting.current.add(key);
+    const previousRun = sessions.find((s) => s.sessionKey === key)?.id;
+    setAttempt(key, { state: 'starting', previousRun });
+    try {
+      const request = await realtimeDraftRequest(key);
+      if (!request) throw new Error('配置尚未载入，请打开此方案的数据源与配置');
+      const actualKey = await invoke<string>('start_realtime', { sessionId: key === 'new' ? null : key, request });
+      const editor = realtimeEditors.get(key)!;
+      if (actualKey !== key) {
+        realtimeEditors.set(actualKey, {
+          ...editor,
+          document: editor.document ? { ...editor.document, values: { ...editor.document.values } } : undefined,
+        });
+        realtimeEditors.delete(key);
+        setAttempt(key);
+        setAttempt(actualKey, { state: 'starting' });
+      }
+      // Retain the row and selection until the next overview contains the native session.
+      setPending((previous) =>
+        previous.some((p) => p.key === actualKey)
+          ? previous
+          : [
+              ...previous,
+              {
+                key: actualKey,
+                label: editor.label,
+                station: editor.station,
+                sourcePath: request.sourcePath,
+              },
+            ],
+      );
+      return actualKey;
+    } catch (error) {
+      failed(key, error instanceof Error ? error.message : String(error));
+      throw error;
+    } finally {
+      submitting.current.delete(key);
+    }
   };
   const load = async (list: string[]) => {
     if (list.length + rows.length > capacity.realtimeRecords) {
@@ -99,7 +164,7 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
         seedRealtimeDraft(key, doc, label);
         return { key, label, station: doc.values.ROVE_NTRIP_Mountpoint || '未指定测站', sourcePath: doc.sourcePath };
       });
-      setPending([...pending, ...incoming]);
+      setPending((previous) => [...previous, ...incoming]);
       setChecked([...checked, ...incoming.map((p) => p.key)]);
       if (incoming[0]) select(incoming[0].key);
       message.success(`已载入 ${incoming.length} 路配置，请核对测站分组与参数后启动`);
@@ -110,30 +175,26 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
     }
   };
   const { ref: dropRef, dragging } = useOptDrop(load);
-  const batchStart = async () => {
+  const batchStart = async (targets = selected) => {
     setBusy(true);
     let count = 0;
+    let rejected = 0;
     const startedKeys: string[] = [];
     try {
-      for (const row of selected.filter((r) => !active(r.snapshot))) {
-        const request = await realtimeDraftRequest(row.key);
-        if (!request) {
-          message.warning(`请先打开 ${row.label} 核对配置`);
-          continue;
-        }
+      for (const row of targets.filter((r) => !occupied(r))) {
         try {
-          await invoke('start_realtime', { sessionId: row.key, request });
+          await startDraft(row.key);
           count++;
           startedKeys.push(row.key);
-        } catch (e) {
-          message.error(`${row.label}：${String(e)}`);
+        } catch {
+          rejected++;
         }
       }
       if (count) {
-        setPending(pending.filter((p) => !startedKeys.includes(p.key)));
         select(startedKeys[0]);
-        message.success(`已启动 ${count} 路；每路独立执行`);
       }
+      if (rejected) message.warning(`${count} 路已提交，${rejected} 路未启动；原因见对应方案行`);
+      else if (count) message.success(`已提交 ${count} 路启动请求；逐路状态见列表`);
     } finally {
       setBusy(false);
     }
@@ -149,7 +210,8 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
     try {
       if (row.snapshot) await workbenchEngine.removeLive(row.key);
       forgetRealtimeDraft(row.key);
-      setPending(pending.filter((p) => p.key !== row.key));
+      setAttempt(row.key);
+      setPending((previous) => previous.filter((p) => p.key !== row.key));
       setChecked(checked.filter((k) => k !== row.key));
       if (focusKey === row.key) select('__new__');
     } catch (e) {
@@ -197,7 +259,10 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
     return () => observer.disconnect();
   }, []);
   const configured = (key: string, doc: RealtimeDocument, label: string, station: string) => {
-    setPending(pending.map((p) => (p.key === key ? { ...p, label, station, sourcePath: doc.sourcePath } : p)));
+    setPending((previous) =>
+      previous.map((p) => (p.key === key ? { ...p, label, station, sourcePath: doc.sourcePath } : p)),
+    );
+    setAttempt(key);
   };
   const displayed = rows.filter((r) => filter === 'all' || r.station === filter);
   return (
@@ -206,7 +271,7 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
       <PageHeading
         eyebrow="MULTI-SESSION MONITOR"
         title="实时工作区"
-        description="同站不同产品与参数同时运行，也可按测站分组监控；每路独立配置、进程与结果目录。"
+        description="勾选多路后点击“启动所选方案”；行内启动和下方详情只操作当前一路。各路独立运行，失败原因保留在列表。"
         actions={
           <Space>
             <Button icon={<PlusOutlined />} onClick={() => select('__new__')}>
@@ -325,11 +390,20 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
             },
             {
               title: '运行状态',
-              width: 110,
+              width: 180,
               render: (_, r) => (
-                <Tag color={r.snapshot?.state === 'failed' ? 'error' : active(r.snapshot) ? 'processing' : 'default'}>
-                  {states[r.snapshot?.state ?? 'idle']}
-                </Tag>
+                <div className="live-start-state">
+                  <Tag
+                    color={
+                      startError(r) || r.snapshot?.state === 'failed' ? 'error' : occupied(r) ? 'processing' : 'default'
+                    }
+                  >
+                    {starting(r) ? '正在启动' : startError(r) ? '启动失败' : states[r.snapshot?.state ?? 'idle']}
+                  </Tag>
+                  {(startError(r) || r.snapshot?.error) && (
+                    <span role="alert">{startError(r) || r.snapshot?.error}</span>
+                  )}
+                </div>
               ),
             },
             {
@@ -364,8 +438,17 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
                 const streams = r.snapshot?.heartbeat?.streams ?? [];
                 return (
                   <span>
-                    {(r.snapshot?.productType === 'RECORD' ? '原始数据' : r.snapshot?.productType) || '待配置'} ·{' '}
-                    {streams.filter((s) => s.state === 2).length}/{streams.length} 已连接
+                    {(r.snapshot?.productType === 'RECORD' ? '原始数据' : r.snapshot?.productType) ||
+                      realtimeEditors.get(r.key)?.document?.values.PRODUCT_NTRIP_Type ||
+                      '—'}{' '}
+                    ·{' '}
+                    {!r.snapshot
+                      ? '尚未启动'
+                      : !active(r.snapshot)
+                        ? '已停止接收'
+                        : !realtimeDisplay(r.snapshot, now).statusFresh
+                          ? '等待状态更新'
+                          : `${streams.filter((s) => s.state === 2).length}/${streams.length} 已连接`}
                   </span>
                 );
               },
@@ -391,12 +474,23 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
                   <Button size="small" type="link" onClick={() => select(r.key)}>
                     详情 / 配置
                   </Button>
+                  {!active(r.snapshot) && (
+                    <Button
+                      size="small"
+                      type="link"
+                      disabled={busy || starting(r)}
+                      loading={starting(r)}
+                      onClick={() => batchStart([r])}
+                    >
+                      {startError(r) || r.snapshot?.state === 'failed' ? '重试启动' : '启动此路'}
+                    </Button>
+                  )}
                   {active(r.snapshot) ? (
                     <Button size="small" type="link" danger onClick={() => stop(r.key)}>
                       停止
                     </Button>
                   ) : (
-                    <Button type="link" size="small" onClick={() => remove(r)}>
+                    <Button type="link" size="small" disabled={busy || starting(r)} onClick={() => remove(r)}>
                       移除
                     </Button>
                   )}
@@ -427,11 +521,11 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
             <Button
               aria-label="启动所选方案"
               type="primary"
-              disabled={!isDesktop() || busy || !selected.some((r) => !active(r.snapshot))}
+              disabled={!isDesktop() || busy || !selected.some((r) => !occupied(r))}
               loading={busy}
-              onClick={batchStart}
+              onClick={() => batchStart()}
             >
-              启动所选方案
+              启动所选方案 · {selected.filter((r) => !occupied(r)).length} 路
             </Button>
             <Button
               disabled={!selected.some((r) => active(r.snapshot))}
@@ -448,9 +542,17 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
               实时对比所选
             </Button>
           </Space>
-          <span>单路停止或失败不影响其它会话；移除记录保留磁盘文件。</span>
+          <span>已勾选 {selected.length} 路；单路停止或失败不影响其它会话。</span>
         </div>
       </Panel>
+      {rows.some((row) => startError(row)) && (
+        <Alert
+          showIcon
+          type="error"
+          title="部分方案未能启动"
+          description="失败原因已保留在对应行；修改配置后可单路重试，其他方案继续运行。"
+        />
+      )}
       <RealtimeMonitor
         key={focusKey}
         sessionKey={focusKey === '__new__' ? undefined : focusKey}
@@ -458,6 +560,14 @@ export default function RealtimeWorkspace({ onResults }: { onResults: (ids: stri
         onConfigured={configured}
         snapshot={detail}
         onStarted={started}
+        onStartRequest={startDraft}
+        onStartFailed={failed}
+        startError={
+          attempts[focusKey === '__new__' ? 'new' : focusKey]?.state === 'failed'
+            ? attempts[focusKey === '__new__' ? 'new' : focusKey]?.error
+            : undefined
+        }
+        submitting={chosen ? starting(chosen) : false}
         handleDrop={false}
       />
     </div>

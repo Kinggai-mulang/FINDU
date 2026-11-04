@@ -3,6 +3,7 @@ import {
   addInputPaths,
   classifyInputPath,
   emptySet,
+  orbitMode,
   problem,
   removeInputPath,
   testName,
@@ -47,6 +48,19 @@ describe('input files', () => {
 });
 
 describe('one set for both comparisons', () => {
+  it('defaults new inputs to auto and preserves legacy manual choices', () => {
+    expect(orbitMode(set())).toBe('auto');
+    expect(orbitMode(set({ apc: true }))).toBe('remove');
+    expect(orbitMode(set({ apc: false }))).toBe('keep');
+    expect(orbitMode(set({ apc: true, orbitMode: 'auto' }))).toBe('auto');
+    expect(toProductSet(set()).orbitMode).toBe('auto');
+  });
+  it('discards conversion provenance when the orbit files change', () => {
+    const converted = set({ sp3: ['a.sp3'], orbitSource: 'has' });
+    expect(addInputPaths(converted, ['a.clk']).set.orbitSource).toBe('has');
+    expect(addInputPaths(converted, ['b.sp3']).set.orbitSource).toBeUndefined();
+    expect(removeInputPath(converted, 'a.sp3').orbitSource).toBeUndefined();
+  });
   const all = set({
     bia: ['r.bia'],
     clk: ['r.clk'],
@@ -55,7 +69,7 @@ describe('one set for both comparisons', () => {
     sign: 'invert',
   });
   it('hands each comparison the part it uses', () => {
-    expect(toProductSet(all)).toEqual({ name: 'x', sp3: ['r.sp3'], clk: ['r.clk'], apc: true });
+    expect(toProductSet(all)).toEqual({ name: 'x', sp3: ['r.sp3'], clk: ['r.clk'], apc: true, orbitMode: 'remove' });
     expect(toBiasSet(all)).toEqual({
       name: 'x',
       files: ['r.bia'],

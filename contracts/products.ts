@@ -38,6 +38,9 @@ export interface ProductRecord {
     origin?: string;
     path?: string;
     message?: string;
+    updateStatus?: 'checked' | 'pinned' | 'offline' | 'fallback';
+    checkedAt?: string;
+    metadata?: { start_gpst: string; end_gpst: string; hold_expiry_gpst: string };
     errors?: { source?: string; message?: string }[];
   };
   job: {

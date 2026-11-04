@@ -1,20 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import {
-  Alert,
-  App,
-  Button,
-  Checkbox,
-  Collapse,
-  Input,
-  InputNumber,
-  Select,
-  Space,
-  Tag,
-  Table,
-  Progress,
-  Empty,
-} from 'antd';
+import { Alert, App, Button, Checkbox, Collapse, Input, InputNumber, Select, Space, Tag, Table, Empty } from 'antd';
 import { CloudDownloadOutlined, FolderOpenOutlined, UploadOutlined } from '@ant-design/icons';
 import type { OptDocument } from '../../contracts';
 import type { ProductRequest, ProductRecord, ProductTransfer } from '../../contracts/products';
@@ -23,6 +9,7 @@ import { PageHeading, Panel } from '../components/common';
 import { isDesktop, pickPath, exportText } from '../services/files';
 import { readStored, writeStored } from '../services/storage';
 import { useOptDrop } from '../services/opt-drop';
+import { productBusy, productStatus } from '../services/product-status';
 const defaults: ProductRequest = {
   observation: '',
   observationDate: '',
@@ -45,7 +32,7 @@ const states: Record<string, string> = {
   unavailable: '不可用（不影响主产品）',
   queued: '排队',
   running: '识别 / 下载 / 校验中',
-  ready: '配置已就绪',
+  ready: '主配置已就绪',
   incomplete: '产品不完整',
   failed: '准备失败',
   cancelled: '已取消',
@@ -81,7 +68,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
   const [jobs, setJobs] = useState<ProductRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [runtimeRoot, setRoot] = useState('当前工程 / runtime');
+  const [runtimeRoot, setRoot] = useState('');
   const { message } = App.useApp();
   const desktop = isDesktop();
   const change = (patch: Partial<ProductRequest>) =>
@@ -110,9 +97,13 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
       }
     };
     void poll();
-    void invoke<{ root: string }>('runtime_paths').then((p) => {
-      if (!disposed) setRoot(p.root);
-    });
+    void invoke<{ root: string }>('runtime_paths')
+      .then((p) => {
+        if (!disposed) setRoot(p.root);
+      })
+      .catch((e: unknown) => {
+        if (!disposed) setError(String(e));
+      });
     const timer = setInterval(() => void poll(), 1200);
     return () => {
       disposed = true;
@@ -191,7 +182,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
       <PageHeading
         eyebrow="OBSERVATION TO PRODUCTS"
         title="数据与下载"
-        description="提供 观测文件，识别实际观测时段，准备配套产品并生成 IPSPOS 配置。"
+        description="按观测时段准备配套产品，查看来源与有效期，生成解算配置。"
         actions={<Tag color="blue">本地工作空间</Tag>}
       />
       {!desktop && <Alert showIcon type="info" title="浏览器为界面预览，产品下载与本地文件访问在 桌面版运行。" />}
@@ -295,20 +286,51 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                 title="GFZ 最终系列暂无配套相位 OSB 入口，轨道、钟差通过基础检查后可生成浮点配置并明确提示；不会混用其他中心偏差。"
               />
             )}
-            <PathInput
-              compact
-              field="GNSS_DCBFile"
-              label="本地 DCB（可选）"
-              hint="自动复用或下载；不可用不影响主产品"
-              value={options.dcbPath || ''}
-              onChange={(v) => change({ dcbPath: v })}
-            />
+            <h3>天线与 DCB</h3>
+            <p className="chart-note">
+              有本地文件可拖入下面对应区域、浏览选择或粘贴路径。填写后固定使用该文件；点击清空可恢复自动选择。
+            </p>
+            <div className="download-form-grid">
+              <div>
+                <label>
+                  天线模型{' '}
+                  <Tag>
+                    {options.antennaPath
+                      ? '本地固定文件'
+                      : options.downloadAntenna && !options.offline
+                        ? '自动检查更新'
+                        : '仅查找本地与缓存'}
+                  </Tag>
+                </label>
+                <PathInput
+                  field="GNSS_ATXFile"
+                  label="ANTEX 天线"
+                  hint=".atx 文件，如 igs20.atx；校验格式及产品参考框架。不是观测文件。"
+                  value={options.antennaPath}
+                  onChange={(v) => change({ antennaPath: v })}
+                />
+              </div>
+              <div>
+                <label>
+                  DCB 码偏差（可选）{' '}
+                  <Tag>{options.dcbPath ? '本地固定文件' : options.offline ? '仅查找本地与缓存' : '自动检查更新'}</Tag>
+                </label>
+                <PathInput
+                  field="GNSS_DCBFile"
+                  label="DCB 码偏差"
+                  hint="Bias-SINEX .BIA / .BSX，须含同频码间差 DSB，不能用精密 OSB 产品替代。准备时校验观测日期适用性。"
+                  value={options.dcbPath || ''}
+                  onChange={(v) => change({ dcbPath: v })}
+                />
+              </div>
+            </div>
             <div className="download-policies">
               <Checkbox
                 checked={options.downloadAntenna}
+                disabled={!!options.antennaPath || options.offline}
                 onChange={(e) => change({ downloadAntenna: e.target.checked })}
               >
-                允许下载并检查匹配 ANTEX 的版本
+                自动选择天线时，允许下载并检查匹配 ANTEX 的版本
               </Checkbox>
               <Checkbox checked={options.switchSource} onChange={(e) => change({ switchSource: e.target.checked })}>
                 下载失败后，自动尝试同系列的其他下载源
@@ -317,6 +339,10 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                 仅使用本地与缓存产品（离线）
               </Checkbox>
             </div>
+            <p className="chart-note">
+              DCB 每次准备时检查适用于观测日期的新产品；ANTEX 每 24 小时联网检查同一参考框架的版本。
+              指定本地文件将固定版本。离线或更新失败时仅复用通过校验的文件，并显示状态。
+            </p>
             <Collapse
               size="small"
               items={[
@@ -326,11 +352,9 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                   children: (
                     <>
                       <div className="download-form-grid">
-                        {(['antennaPath', 'localRoot'] as const).map((key) => (
+                        {(['localRoot'] as const).map((key) => (
                           <div key={key}>
-                            <label>
-                              {key === 'antennaPath' ? '指定本地 ANTEX（可选）' : '搜索本地产品目录（可选）'}
-                            </label>
+                            <label>搜索本地产品目录（可选）</label>
                             <Space.Compact block>
                               <Input
                                 aria-label={key}
@@ -398,8 +422,8 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
             title="准备队列"
             extra={
               <Space wrap>
-                <Tag>{jobs.filter((r) => ongoing(r.job.status)).length} 项进行中</Tag>
-                <Button size="small" disabled={!jobs.some((r) => !ongoing(r.job.status))} onClick={() => dismiss(null)}>
+                <Tag>{jobs.filter(productBusy).length} 项进行中</Tag>
+                <Button size="small" disabled={!jobs.some((r) => !productBusy(r))} onClick={() => dismiss(null)}>
                   清除已结束
                 </Button>
               </Space>
@@ -421,6 +445,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                 const total = Object.keys(record.plan?.tasks ?? {}).length;
                 const ready = record.manifest?.results.filter((r) => r.status === 'ready' && r.opt) ?? [];
                 const obs = record.plan?.observation;
+                const summary = productStatus(record);
                 return (
                   <article className="product-job" key={job.id}>
                     <div className="product-job-heading">
@@ -455,18 +480,12 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                     )}
                     {total > 0 && (
                       <>
-                        <Progress
-                          percent={
-                            job.status === 'ready' ? 100 : Math.min(95, Math.floor((ok / Math.max(total, 1)) * 100))
-                          }
-                          showInfo={false}
-                          status={job.status === 'ready' ? 'success' : job.status === 'failed' ? 'exception' : 'normal'}
-                        />
                         <small className="subtle">
                           已校验 {ok} 项；计划最多 {total} 项（含候选等级）
                         </small>
                       </>
                     )}
+                    <Alert showIcon type={summary.type} title={summary.title} description={summary.detail} />
                     {job.status === 'needs_date' && (
                       <Space.Compact>
                         <Input
@@ -500,9 +519,34 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                           </span>
                         )}
                         {record.dcb.message && <span>{record.dcb.message}</span>}
+                        {record.dcb.updateStatus && (
+                          <Tag color={record.dcb.updateStatus === 'fallback' ? 'orange' : undefined}>
+                            {
+                              {
+                                checked: '已联网更新',
+                                pinned: '固定本地版本',
+                                offline: '离线 · 未检查更新',
+                                fallback: '更新未确认 · 使用有效缓存',
+                              }[record.dcb.updateStatus]
+                            }
+                          </Tag>
+                        )}
+                        {record.dcb.metadata && (
+                          <div className="chart-note">
+                            产品有效期（GPST）：{record.dcb.metadata.start_gpst.replace('T', ' ')} ～{' '}
+                            {record.dcb.metadata.end_gpst.replace('T', ' ')}；保持截止：{' '}
+                            {record.dcb.metadata.hold_expiry_gpst.replace('T', ' ')}
+                          </div>
+                        )}
+                        {record.dcb.checkedAt && (
+                          <div className="chart-note">
+                            最近检查（UTC）：
+                            {new Date(record.dcb.checkedAt).toISOString().replace('T', ' ').replace('Z', '')}
+                          </div>
+                        )}
                         {!['queued', 'running'].includes(record.dcb.status) && (
                           <Button size="small" onClick={() => action('retry_product_dcb', job.id)}>
-                            仅重试 DCB
+                            检查 / 重试 DCB
                           </Button>
                         )}
                         <Collapse
@@ -561,8 +605,12 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                           取消
                         </Button>
                       ) : (
-                        <Button size="small" onClick={() => action('retry_product', job.id)}>
-                          重试 / 复用缓存
+                        <Button
+                          size="small"
+                          disabled={productBusy(record)}
+                          onClick={() => action('retry_product', job.id)}
+                        >
+                          重新检查主产品
                         </Button>
                       )}
                       {ready.length > 0 && (
@@ -578,7 +626,7 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                       <Button size="small" onClick={() => action('open_product_folder', job.id)}>
                         打开目录
                       </Button>
-                      {!ongoing(job.status) && (
+                      {!productBusy(record) && (
                         <Button size="small" onClick={() => dismiss([job.id])}>
                           移除记录
                         </Button>
@@ -625,6 +673,15 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
                                                 ? '已下载'
                                                 : ''}
                                         </small>
+                                        {r.antenna && (
+                                          <div className="chart-note">
+                                            {r.antenna.explicit
+                                              ? '固定本地版本'
+                                              : r.antenna.versionChecked
+                                                ? '24 小时内已确认版本'
+                                                : '未联网确认版本'}
+                                          </div>
+                                        )}
                                       </>
                                     ),
                                   },
@@ -700,9 +757,22 @@ export default function DataDownloads({ onPrepared }: { onPrepared: (docs: OptDo
           <div className="download-location">
             <FolderOpenOutlined />
             <span>
-              产品与 OPT：{runtimeRoot}\downloads
-              <br />
-              共享缓存：{runtimeRoot}\cache\products
+              当前程序的本地存储位置
+              {runtimeRoot ? (
+                <>
+                  <br />
+                  产品与 OPT：{runtimeRoot.replaceAll('\\', '/').replace(/\/$/, '')}/downloads
+                  <br />
+                  产品缓存：{runtimeRoot.replaceAll('\\', '/').replace(/\/$/, '')}/cache/products
+                </>
+              ) : (
+                <p>
+                  {desktop
+                    ? '尚未获取存储位置，请检查上方错误提示或稍后重新打开此页面。'
+                    : '桌面版启动后显示实际存储位置。'}
+                </p>
+              )}
+              <p>目录随程序所在位置自动确定并创建，无需预先准备。产品缓存供当前程序的多个任务复用。</p>
             </span>
           </div>
           <p className="chart-note">

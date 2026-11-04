@@ -60,7 +60,17 @@ describe('comparison export and charts', () => {
     expect(lines[0]).toContain('三维RMS cm');
     expect(lines[1].split(',')[1]).toBe('G01');
     expect(lines[2]).toContain('16.00');
-    expect(lines[2].endsWith('是')).toBe(true);
+    expect(lines[2].split(',').at(-4)).toBe('是');
+  });
+  it('exports the applied orbit treatment and original radial offset', () => {
+    const r = result('HAS', [sat('G01', 0.03)]);
+    r.apc = true;
+    r.orbitDecision = { mode: 'auto', applied: true, reason: '推断参考点差异', radialOffsets: { G01: -1.3 } };
+    const lines = comparisonCsv([r]).trim().split('\r\n');
+    expect(lines[0]).toContain('判别依据');
+    expect(lines[1]).toContain('去径向常量');
+    expect(lines[1]).toContain('推断参考点差异');
+    expect(lines[1].endsWith('-130.0000')).toBe(true);
   });
   it('builds a coloured, sorted satellite bar chart and marks outliers', () => {
     const option = satelliteBarOption(results, 'd3') as {

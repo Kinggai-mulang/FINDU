@@ -360,7 +360,8 @@ try {
     await page.getByRole('button', { name: /实时监控/ }).click();
     await page.getByRole('button', { name: '切换 01_PERF', exact: true }).click();
     await page.waitForTimeout(3000);
-    const readReceived = () => page.locator('.ant-table-tbody tr.ant-table-row').first().innerText();
+    const readReceived = () =>
+      page.locator('.ant-table-tbody tr.ant-table-row').filter({ hasText: '01_PERF' }).first().innerText();
     report.scenarios['realtime-detail'] = await measure(() => freshness(readReceived, windowSeconds));
     await removeRealtimeServer();
   }

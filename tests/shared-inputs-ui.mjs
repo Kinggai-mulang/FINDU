@@ -47,6 +47,10 @@ await page.addInitScript(() => {
       }
       if (command === 'plugin:event|unlisten') return undefined;
       window.calls.push({ command, ...args });
+      if (command === 'expand_dropped_paths') {
+        if (window.holdScan) return new Promise((resolve) => (window.finishScan = () => resolve(args.paths)));
+        return args.paths;
+      }
       if (command === 'compare_products' || command === 'compare_biases')
         return {
           results: [],
@@ -67,6 +71,16 @@ const callsOf = (command) => page.evaluate((c) => window.calls.filter((x) => x.c
 const note = page.getByTestId('input-note');
 await start.waitFor();
 await page.waitForTimeout(500);
+
+// Naming a single product must not depend on whether it can be removed.
+const firstName = page.getByRole('textbox', { name: '对比产品 1名称', exact: true });
+await firstName.fill('WHU 单组');
+await page.reload();
+await page.waitForFunction(() => document.querySelector('[aria-label="对比产品 1名称"]')?.value === 'WHU 单组');
+await page.getByRole('button', { name: '添加对比产品' }).click();
+await page.getByRole('button', { name: '移除对比产品 2', exact: true }).click();
+await firstName.fill('对比产品 1');
+assert.equal(await page.getByRole('button', { name: '移除对比产品 1', exact: true }).count(), 0);
 
 // One drop of all three kinds into the reference and into product 1.
 await dropOn(page.locator('[data-role="参考产品"]'), ['D:/r/ref_OSB.BIA', 'D:/r/ref_CLK.CLK', 'D:/r/ref_ORB.SP3']);
@@ -96,6 +110,8 @@ assert.deepEqual(orbit.request.reference, {
   sp3: ['D:/r/ref_ORB.SP3'],
   clk: ['D:/r/ref_CLK.CLK'],
   apc: false,
+  orbitMode: 'auto',
+  orbitSource: undefined,
 });
 assert.deepEqual(
   orbit.request.tests.map((t) => [t.name, t.sp3]),
@@ -155,6 +171,36 @@ await page.locator('[data-role="参考产品"]').getByText('SP3 · ref_ORB.SP3')
 await page.reload();
 await page.getByText('SP3 · ref_ORB.SP3').waitFor();
 await page.getByText('CLK · whu.clk').waitFor();
+
+// Each clear owns one side, persists across reload, and invalidates a pending folder scan.
+await page.evaluate(() => (window.holdScan = true));
+await dropOn(page.locator('[data-role="参考产品"]'), ['D:/r/pending.sp3']);
+await page.waitForFunction(() => typeof window.finishScan === 'function');
+await page.getByRole('button', { name: '清空参考产品', exact: true }).click();
+await page.evaluate(() => window.finishScan());
+assert.equal(await page.locator('[data-role="参考产品"] .ant-tag').count(), 0);
+await page.getByText('CLK · whu.clk').waitFor();
+assert.equal(await start.isDisabled(), true);
+await page.reload();
+assert.equal(await page.locator('[data-role="参考产品"] .ant-tag').count(), 0);
+await page.getByText('CLK · whu.clk').waitFor();
+await dropOn(page.locator('[data-role="参考产品"]'), ['D:/r/new.sp3']);
+await page.getByText('SP3 · new.sp3').waitFor();
+await page.evaluate(() => (window.holdScan = true));
+await dropOn(page.locator('[data-role="对比产品 1"]'), ['D:/t/pending.sp3']);
+await page.waitForFunction(() => typeof window.finishScan === 'function');
+await page.getByRole('button', { name: '清空对比产品', exact: true }).click();
+await page.evaluate(() => window.finishScan());
+assert.equal(await page.locator('.product-tests .product-editor').count(), 1);
+assert.equal(await page.locator('.product-tests .product-files .ant-tag').count(), 0);
+await page.getByText('SP3 · new.sp3').waitFor();
+await page.reload();
+assert.equal(await page.locator('.product-tests .product-editor').count(), 1);
+assert.equal(await page.locator('.product-tests .product-files .ant-tag').count(), 0);
+await page.getByText('SP3 · new.sp3').waitFor();
+await page.setViewportSize({ width: 1280, height: 1000 });
+assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+await page.screenshot({ path: 'runtime/compare-ui-shared/clear-products.png', fullPage: true });
 
 assert.deepEqual(errors, []);
 await browser.close();

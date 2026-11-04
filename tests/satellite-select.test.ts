@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   classGroups,
-  groupSatellites,
   invertExcluded,
   parseSatellites,
-  satelliteGroups,
   setExcluded,
   toggleExcluded,
 } from '../src/services/satellite-select';
@@ -31,18 +29,6 @@ describe('satellite ranges typed as text', () => {
     expect(sats).toEqual(['C01']);
     expect(unknown).toEqual(['R05', 'C01-G05', 'HELLO']);
     expect(parseSatellites('', all)).toEqual({ sats: [], unknown: [] });
-  });
-});
-
-describe('satellite groups', () => {
-  const group = (key: string) => satelliteGroups.C.find((g) => g.key === key)!;
-  it('splits BeiDou generations by number, which is only an approximation', () => {
-    expect(groupSatellites('C', group('bds2'), all)).toEqual(['C01', 'C02', 'C06', 'C11', 'C12', 'C16']);
-    expect(groupSatellites('C', group('bds3'), all)).toEqual(['C19', 'C20', 'C31', 'C38', 'C59']);
-    expect(group('bds2').hint).toContain('近似');
-  });
-  it('has no groups by number for constellations without generations', () => {
-    expect(satelliteGroups.G).toBeUndefined();
   });
 });
 
@@ -73,6 +59,15 @@ describe('satellite groups by orbit type', () => {
     expect(classGroups('G', classes, sats)).toEqual([]);
     expect(classGroups('C', {}, sats)).toEqual([]);
   });
+  it('keeps a single measured BeiDou class visible and leaves unknown satellites out', () => {
+    expect(classGroups('C', { C01: 'MEO' }, ['C01', 'C59'])).toEqual([{ key: 'MEO', label: 'MEO', members: ['C01'] }]);
+  });
+  it('follows changed orbital classifications without a PRN generation rule', () => {
+    expect(classGroups('C', { C01: 'MEO', C59: 'GEO' }, ['C01', 'C59'])).toEqual([
+      { key: 'GEO', label: 'GEO', members: ['C59'] },
+      { key: 'MEO', label: 'MEO', members: ['C01'] },
+    ]);
+  });
 });
 
 describe('exclusion lists', () => {
@@ -81,9 +76,9 @@ describe('exclusion lists', () => {
     expect(setExcluded(['C01', 'C02', 'G02'], ['C01', 'G13'], false)).toEqual(['C02', 'G02']);
   });
   it('a group button excludes everything first and restores only when all of it is already out', () => {
-    const bds2 = ['C01', 'C02', 'C06'];
-    expect(toggleExcluded(['C01'], bds2)).toEqual(['C01', 'C02', 'C06']);
-    expect(toggleExcluded(['C01', 'C02', 'C06', 'G01'], bds2)).toEqual(['G01']);
+    const members = ['C01', 'C02', 'C06'];
+    expect(toggleExcluded(['C01'], members)).toEqual(['C01', 'C02', 'C06']);
+    expect(toggleExcluded(['C01', 'C02', 'C06', 'G01'], members)).toEqual(['G01']);
     expect(toggleExcluded([], [])).toEqual([]);
   });
   it('inverts only the given satellites and leaves the others alone', () => {

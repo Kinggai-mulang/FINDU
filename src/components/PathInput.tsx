@@ -36,7 +36,7 @@ export function PathInput({
     } catch (e) {
       if (field !== 'GNSS_DCBFile') throw e;
       onChange?.(path);
-      message.warning(`DCB 不可用，启动时自动关闭：${String(e)}`);
+      message.warning(`DCB 文件未通过校验，不能作为有效产品使用：${String(e)}`);
     }
   };
   const { ref, dragging } = useFileDrop({
@@ -58,7 +58,9 @@ export function PathInput({
           {directory ? <FolderOpenOutlined /> : value ? <FileOutlined /> : <InboxOutlined />}
         </span>
         <Tooltip title={value || hint}>
-          <span className="path-file-name">{name || `拖入${directory ? '文件夹' : '文件'}，或点击浏览`}</span>
+          <span className="path-file-name">
+            {name ? `${label} · ${name}` : `拖入${label}${directory ? '文件夹' : '文件'}，或点击浏览`}
+          </span>
         </Tooltip>
         {value && <span className="path-assigned">已填写</span>}
       </div>
@@ -71,7 +73,7 @@ export function PathInput({
           onBlur={() => {
             if (field === 'GNSS_DCBFile' && value && isDesktop())
               void invoke('validate_input_path', { path: value, role: field }).catch((e) =>
-                message.warning(`DCB 不可用，启动时自动关闭：${String(e)}`),
+                message.warning(`DCB 文件未通过校验，不能作为有效产品使用：${String(e)}`),
               );
           }}
           placeholder={hint || label}
@@ -83,7 +85,7 @@ export function PathInput({
             icon={<FolderOpenOutlined />}
             onClick={async () => {
               try {
-                const p = await pickPath(directory);
+                const p = await pickPath(directory, `选择${label}`);
                 if (p) await assign(p);
               } catch (e) {
                 message.error(String(e));

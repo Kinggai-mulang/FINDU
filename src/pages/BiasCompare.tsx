@@ -131,7 +131,14 @@ export const BiasResults = memo(function BiasResults({ results }: { results: Bia
                     <div className="bias-tiles">
                       {results.map((r, i) => {
                         const h = headline(r, kind);
-                        if (!h) return null;
+                        if (!h)
+                          return (
+                            <div key={r.name} className="bias-tile" data-testid="bias-tile">
+                              <span className="bias-tile-name">{r.name}</span>
+                              <span>无可比的{kindNames[kind]}</span>
+                              <span className="bias-tile-note">未提供此类偏差，或没有共同有效样本</span>
+                            </div>
+                          );
                         return (
                           <div key={r.name} className="bias-tile" data-testid="bias-tile">
                             <span className="bias-tile-name">
@@ -416,6 +423,24 @@ export const BiasResults = memo(function BiasResults({ results }: { results: Bia
                     {r.testOnly.length > 0 && <div>只在对比产品中：{r.testOnly.join(' ')}</div>}
                     {r.referenceOnly.length > 0 && <div>参考中有、对比产品缺少：{r.referenceOnly.join(' ')}</div>}
                     {r.testOnly.length === 0 && r.referenceOnly.length === 0 && <div>两份产品的卫星完全一致。</div>}
+                    <div>
+                      共同相位信号：
+                      {r.rows
+                        .filter((row) => row.kind === 'phase')
+                        .map((row) => `${systemNames[row.system] ?? row.system} ${row.signal}（${row.sats} 星）`)
+                        .join('；') || '无'}
+                    </div>
+                    <div>
+                      北斗宽巷实际参与卫星：
+                      {[
+                        ...new Set(
+                          r.items.filter((item) => item.system === 'C' && item.kind === 'wl').map((item) => item.sat),
+                        ),
+                      ]
+                        .sort()
+                        .join(' ') || '无可比信号对'}
+                      。相位信号有交集不等于具备完整宽巷组合。
+                    </div>
                   </li>
                 ))}
               </ul>

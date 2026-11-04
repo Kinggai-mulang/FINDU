@@ -1,5 +1,6 @@
 """Offline regression: optional DSB failure cannot invalidate a usable primary OPT."""
 import json
+import gzip
 import sys
 import tempfile
 import unittest
@@ -61,14 +62,55 @@ class OptionalProducts(unittest.TestCase):
         p=self.root/'valid.bia';p.write_text(dsb())
         with self.assertRaises(ValueError):optional_dcb.qualify(p,{**self.obs,'end':'2026-11-01T00:00:00'})
 
+    def test_explicit_valid_file_is_pinned_even_online(self):
+        p=self.root/'pinned.bia';p.write_text(dsb())
+        self.request.update(dcbPath=str(p),offline=False)
+        state=self.run_optional()
+        self.assertEqual(state['updateStatus'],'pinned')
+        self.assertEqual(state['origin'],'local')
+
     def test_timeout_is_optional_and_budgeted(self):
         dump(self.root/'request.json',{**self.request,'offline':False})
         import subprocess
-        with patch.object(optional_dcb.time,'monotonic',side_effect=[0,0,0,46,46,46]),patch.object(optional_dcb.subprocess,'run',side_effect=subprocess.TimeoutExpired('curl',15)) as fetch:
+        with patch.object(optional_dcb.time,'monotonic',side_effect=[0,0,46]),patch.object(optional_dcb.subprocess,'run',side_effect=subprocess.TimeoutExpired('curl',10)) as fetch:
             self.assertEqual(optional_dcb.run(self.root/'request.json'),0)
         self.assertLessEqual(fetch.call_count,1)
         self.assertEqual(self.opt.read_text(),self.original)
         self.assertTrue(json.loads((self.root/'work/manifest.json').read_text())['ready'])
+
+    def test_newest_valid_local_product_wins_not_directory_order(self):
+        (self.root/'older.bia').write_text(dsb('2026:279:00000','2026:280:00000'))
+        (self.root/'newer.bia').write_text(dsb('2026:281:00000','2026:282:00000'))
+        state=self.run_optional()
+        self.assertEqual(state['metadata']['start_gpst'],'2026-10-08T00:00:00')
+
+    def test_online_refresh_replaces_usable_old_cache(self):
+        (self.root/'older.bia').write_text(dsb())
+        dump(self.root/'request.json',{**self.request,'offline':False})
+        def fetch(args, **kwargs):
+            target=Path(args[args.index('--output')+1])
+            if args[-1].endswith('/'):
+                target.write_text('CAS1OPSRAP_20262810000_01D_01D_DCB.BIA.gz')
+            else:
+                target.write_bytes(gzip.compress(dsb('2026:281:00000','2026:282:00000').encode()))
+            from types import SimpleNamespace
+            return SimpleNamespace(returncode=0)
+        with patch.object(optional_dcb.subprocess,'run',side_effect=fetch) as network:
+            optional_dcb.run(self.root/'request.json')
+        state=json.loads((self.root/'dcb.json').read_text())
+        self.assertEqual(state['updateStatus'],'checked')
+        self.assertEqual(state['metadata']['start_gpst'],'2026-10-08T00:00:00')
+        self.assertEqual(network.call_count,2)
+
+    def test_update_failure_retains_valid_local_with_warning(self):
+        (self.root/'older.bia').write_text(dsb())
+        dump(self.root/'request.json',{**self.request,'offline':False,'switchSource':False})
+        with patch.object(optional_dcb.subprocess,'run',side_effect=OSError('offline')):
+            optional_dcb.run(self.root/'request.json')
+        state=json.loads((self.root/'dcb.json').read_text())
+        self.assertEqual(state['status'],'ok')
+        self.assertEqual(state['updateStatus'],'fallback')
+        self.assertIn('GNSS_bUseDCB = ON;',self.opt.read_text())
 
 
 if __name__=='__main__':unittest.main()

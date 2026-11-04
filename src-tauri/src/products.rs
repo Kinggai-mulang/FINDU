@@ -392,17 +392,22 @@ impl Products {
     }
     pub fn dismiss(&self, ids: Option<Vec<String>>) -> Result<(), String> {
         let mut d = self.data.lock().unwrap();
-        let selected = ids
-            .unwrap_or_else(|| d.jobs.iter().filter(|j| !active(&j.status)).map(|j| j.id.clone()).collect());
-        if d.jobs.iter().any(|j| selected.contains(&j.id) && active(&j.status)) {
+        let selected = ids.unwrap_or_else(|| {
+            d.jobs
+                .iter()
+                .filter(|j| !active(&j.status) && !d.optional.contains_key(&j.id))
+                .map(|j| j.id.clone())
+                .collect()
+        });
+        if d.jobs
+            .iter()
+            .any(|j| selected.contains(&j.id) && (active(&j.status) || d.optional.contains_key(&j.id)))
+        {
             return Err("请先取消任务，结束后再移除".into());
         }
         for j in d.jobs.iter().filter(|j| selected.contains(&j.id)) {
             fs::write(Path::new(&j.directory).join(".queue-removed"), b"removed; outputs retained")
                 .map_err(|e| e.to_string())?;
-            if let Some(flag) = d.optional.get(&j.id) {
-                flag.store(true, Ordering::SeqCst);
-            }
         }
         d.jobs.retain(|j| !selected.contains(&j.id));
         for id in selected {
@@ -545,6 +550,12 @@ mod tests {
         };
         persist(&job);
         let rt = Products::new(root.clone(), root.clone(), root.clone());
+        rt.data.lock().unwrap().optional.insert(id.clone(), Arc::new(AtomicBool::new(false)));
+        rt.dismiss(None).unwrap();
+        assert_eq!(rt.snapshot().as_array().unwrap().len(), 1);
+        assert!(rt.dismiss(Some(vec![id.clone()])).is_err());
+        assert!(!dir.join(".queue-removed").exists());
+        rt.data.lock().unwrap().optional.remove(&id);
         rt.dismiss(None).unwrap();
         assert_eq!(rt.snapshot(), json!([]));
         assert_eq!(Products::new(root.clone(), root.clone(), root).snapshot(), json!([]));

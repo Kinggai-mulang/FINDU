@@ -210,7 +210,7 @@ fn main() {
             let beside = std::env::current_exe()?.parent().unwrap().join("engine");
             let resource = native::platform::engine_resources(&app.path().resource_dir()?.join("engine"));
             let dev = native::platform::engine_resources(
-                &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources/engine"),
+                &std::path::PathBuf::from(&paths.workspace).join("resources/engine"),
             );
             let engine = if beside.join(native::platform::SOLVER).is_file() {
                 beside
@@ -236,7 +236,7 @@ fn main() {
                 } else if resource.is_dir() {
                     resource
                 } else {
-                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../resources").join(name)
+                    std::path::PathBuf::from(&paths.workspace).join("resources").join(name)
                 }
             };
             let mut runtime = locate("product-runtime");
